@@ -232,12 +232,6 @@ static void mouse_button(int button, int state, int x, int y) {
     if (button == GLUT_LEFT_BUTTON) {
         if (state == GLUT_DOWN) {
             mouse_locked = true;
-            // Center mouse for more room to move
-            int width, height;
-            glutGet(&GLUT_WINDOW_WIDTH);
-            glutGet(&GLUT_WINDOW_HEIGHT);
-            // NOTE: On Windows with GLUT we can't easily set cursor pos,
-            // so we rely on the motion callback tracking deltas.
         } else {
             mouse_locked = false;
         }
