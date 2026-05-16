@@ -33,7 +33,6 @@
 #else
 #include <GLUT/glut.h>
 #include <gl/gl.h>
-#include <windows.h>
 #endif
 
 static const unsigned max_body_count = 2048;
@@ -56,9 +55,13 @@ static float camera_pitch = 0.0f;  // radians, vertical rotation
 static bool mouse_locked = false;
 
 // Camera settings
-static const float camera_move_speed = 20.0f;
-static const float camera_mouse_sensitivity = 0.002f;
+static const float camera_move_speed = 40.0f;
+static const float camera_mouse_sensitivity = 0.003f;
 static const float camera_pitch_max = 1.5f;  // ~85 degrees
+
+// Key state tracked by GLUT callbacks
+static bool key_state[256] = {};
+static int debug_frame = 0;
 
 static inline void quaternion_concat(float r[4], const float a[4], const float b[4]) {
 	r[0] = b[0]*a[3] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1];
@@ -127,20 +130,19 @@ static inline void camera_look_target(float target[3], const float pos[3], float
 
 // Update camera position based on held keys and delta time.
 static inline void camera_update(float dt) {
-    // Poll keys directly via Windows API.
-    // GetAsyncKeyState returns negative SHORT when key is held down.
-    #define KEY(vk) (GetAsyncKeyState(vk) < 0)
+    // Debug: print key states every 30 frames to verify input.
+    debug_frame++;
+    if (debug_frame == 30) {
+        printf("[camera] pos=(%.1f,%.1f,%.1f) yaw=%.2f pitch=%.2f mouse=%d keys:w=%d s=%d a=%d d=%d\n",
+               camera_position[0], camera_position[1], camera_position[2],
+               camera_yaw, camera_pitch, mouse_locked,
+               key_state['W'], key_state['S'], key_state['A'], key_state['D']);
+    }
 
-    bool w = KEY('W');
-    bool s = KEY('S');
-    bool a = KEY('A');
-    bool d = KEY('D');
-    bool shift = KEY(VK_SHIFT);
-
-    if (KEY(VK_ESCAPE)) exit(0);
+    if (key_state[27]) exit(0);  // Escape
 
     float speed = camera_move_speed * dt;
-    if (shift) speed *= 3.0f;
+    if (key_state['X'] || key_state['x']) speed *= 3.0f;  // Hold X to sprint
 
     float cy = cosf(camera_yaw), sy = sinf(camera_yaw);
 
@@ -153,10 +155,10 @@ static inline void camera_update(float dt) {
     float right_z = -sy;
 
     float dx = 0.0f, dz = 0.0f;
-    if (w) { dx += forward_x; dz += forward_z; }
-    if (s) { dx -= forward_x; dz -= forward_z; }
-    if (a) { dx -= right_x; dz -= right_z; }
-    if (d) { dx += right_x; dz += right_z; }
+    if (key_state['W'] || key_state['w']) { dx += forward_x; dz += forward_z; }
+    if (key_state['S'] || key_state['s']) { dx -= forward_x; dz -= forward_z; }
+    if (key_state['A'] || key_state['a']) { dx -= right_x; dz -= right_z; }
+    if (key_state['D'] || key_state['d']) { dx += right_x; dz += right_z; }
 
     // Normalize if diagonal
     float len = sqrtf(dx * dx + dz * dz);
@@ -167,8 +169,18 @@ static inline void camera_update(float dt) {
 
     camera_position[0] += dx;
     camera_position[2] += dz;
+}
 
-    #undef KEY
+// GLUT keyboard callbacks - track key state.
+static void key_down(unsigned char key, int, int) {
+    if (key < 256) key_state[key] = true;
+    if (debug_frame == 0 || (key == 'W' || key == 'w')) {
+        printf("[key down] %c (ascii=%d)\n", (key >= 32 && key < 127) ? (char)key : '?', (int)key);
+    }
+}
+
+static void key_up(unsigned char key, int, int) {
+    if (key < 256) key_state[key] = false;
 }
 
 static void mouse_motion(int x, int y) {
@@ -191,12 +203,13 @@ static void mouse_motion(int x, int y) {
 }
 
 static void mouse_button(int button, int state, int x, int y) {
-    if (button == GLUT_LEFT_BUTTON) {
-        if (state == GLUT_DOWN) {
-            mouse_locked = true;
-        } else {
-            mouse_locked = false;
-        }
+    if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
+        mouse_locked = !mouse_locked;  // toggle on click
+        printf("[mouse] locked=%d\n", mouse_locked);
+    }
+    // When unlocking, reset last position to avoid jump
+    if (!mouse_locked) {
+        mouse_motion(x, y);  // resets static last_x/last_y implicitly on next call
     }
 }
 
@@ -540,10 +553,14 @@ int main(int argc, const char* argv[]) {
 	glutInitWindowSize(1024, 600);
 	glutCreateWindow("nudge");
 	glutDisplayFunc(render);
+	glutKeyboardFunc(key_down);
+	glutKeyboardUpFunc(key_up);
 	glutMotionFunc(mouse_motion);
+	glutPassiveMotionFunc(mouse_motion);
 	glutMouseFunc(mouse_button);
 
-	printf("Controls: click to lock mouse | WASD move | Shift sprint | Esc quit\n");
+	printf("Controls: click to lock/unlock mouse | WASD move | X sprint | Esc quit\n");
+	printf("[debug] key states printed every 30 frames\n");
 
 	timer(0);
 	
