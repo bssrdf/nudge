@@ -48,6 +48,24 @@ static nudge::ContactData contact_data;
 static nudge::ContactCache contact_cache;
 static nudge::ActiveBodies active_bodies;
 
+// Camera state
+static float camera_position[3] = { 0.0f, 5.0f, 20.0f };
+static float camera_yaw = 0.0f;    // radians, horizontal rotation
+static float camera_pitch = 0.0f;  // radians, vertical rotation
+static bool mouse_locked = false;
+
+// Keyboard state
+static bool key_w = false;
+static bool key_s = false;
+static bool key_a = false;
+static bool key_d = false;
+static bool key_shift = false;
+
+// Camera settings
+static const float camera_move_speed = 20.0f;
+static const float camera_mouse_sensitivity = 0.002f;
+static const float camera_pitch_max = 1.5f;  // ~85 degrees
+
 static inline void quaternion_concat(float r[4], const float a[4], const float b[4]) {
 	r[0] = b[0]*a[3] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1];
 	r[1] = b[1]*a[3] + a[1]*b[3] + a[2]*b[0] - a[0]*b[2];
@@ -104,6 +122,138 @@ static inline void matrix(float r[16], const float s[3], const float q[4], const
 	r[13] = t[1];
 	r[14] = t[2];
 	r[15] = 1.0f;
+}
+
+// Build a view matrix from camera position, yaw, and pitch.
+static inline void camera_view_matrix(float m[16], const float pos[3], float yaw, float pitch) {
+    float cy = cosf(yaw), sy = sinf(yaw);
+    float cp = cosf(pitch), sp = sinf(pitch);
+
+    // Forward and right vectors
+    float fx = -sy * cp;
+    float fy = sp;
+    float fz = -cy * cp;
+
+    // Right vector (cross of forward and world up)
+    float rx = cy;
+    float ry = 0.0f;
+    float rz = -sy;
+
+    // Up vector (cross of right and forward)
+    float ux = sy * sp;
+    float uy = cp;
+    float uz = cy * sp;
+
+    m[0] = rx; m[1] = ux; m[2] = fx; m[3] = 0.0f;
+    m[4] = ry; m[5] = uy; m[6] = fy; m[7] = 0.0f;
+    m[8] = rz; m[9] = uz; m[10] = fz; m[11] = 0.0f;
+    m[12] = -(rx * pos[0] + ry * pos[1] + rz * pos[2]);
+    m[13] = -(ux * pos[0] + uy * pos[1] + uz * pos[2]);
+    m[14] = -(fx * pos[0] + fy * pos[1] + fz * pos[2]);
+    m[15] = 1.0f;
+}
+
+// Update camera position based on held keys and delta time.
+static inline void camera_update(float dt) {
+    float speed = camera_move_speed * dt;
+    if (key_shift) speed *= 3.0f;
+
+    float cy = cosf(camera_yaw), sy = sinf(camera_yaw);
+
+    // Forward: -z in camera space (yaw only, pitch doesn't affect movement plane)
+    float forward_x = -sy;
+    float forward_z = -cy;
+
+    // Right: +x in camera space
+    float right_x = cy;
+    float right_z = -sy;
+
+    float dx = 0.0f, dz = 0.0f;
+    if (key_w) { dx += forward_x; dz += forward_z; }
+    if (key_s) { dx -= forward_x; dz -= forward_z; }
+    if (key_a) { dx -= right_x; dz -= right_z; }
+    if (key_d) { dx += right_x; dz += right_z; }
+
+    // Normalize if diagonal
+    float len = sqrtf(dx * dx + dz * dz);
+    if (len > 0.001f) {
+        dx = (dx / len) * speed;
+        dz = (dz / len) * speed;
+    }
+
+    camera_position[0] += dx;
+    camera_position[2] += dz;
+
+    // Allow vertical movement with Q/E if needed (optional, keeping simple)
+    // camera_position[1] can be adjusted with key_w/s on slopes, etc.
+}
+
+static void key_down(unsigned char key, int, int) {
+    switch (key) {
+        case 'w': case 'W': key_w = true; break;
+        case 's': case 'S': key_s = true; break;
+        case 'a': case 'A': key_a = true; break;
+        case 'd': case 'D': key_d = true; break;
+        case 16: key_shift = true; break;  // Shift
+        case 27: exit(0); break;  // Escape
+    }
+}
+
+static void key_up(unsigned char key, int, int) {
+    switch (key) {
+        case 'w': case 'W': key_w = false; break;
+        case 's': case 'S': key_s = false; break;
+        case 'a': case 'A': key_a = false; break;
+        case 'd': case 'D': key_d = false; break;
+        case 16: key_shift = false; break;  // Shift
+    }
+}
+
+static void special_key_down(int key, int, int) {
+    switch (key) {
+        case GLUT_KEY_SHIFT_L: case GLUT_KEY_SHIFT_R: key_shift = true; break;
+    }
+}
+
+static void special_key_up(int key, int, int) {
+    switch (key) {
+        case GLUT_KEY_SHIFT_L: case GLUT_KEY_SHIFT_R: key_shift = false; break;
+    }
+}
+
+static void mouse_motion(int x, int y) {
+    if (!mouse_locked) return;
+
+    static int last_x = -1, last_y = -1;
+    if (last_x < 0) { last_x = x; last_y = y; return; }
+
+    int dx = x - last_x;
+    int dy = y - last_y;
+    last_x = x;
+    last_y = y;
+
+    camera_yaw += dx * camera_mouse_sensitivity;
+    camera_pitch -= dy * camera_mouse_sensitivity;
+
+    // Clamp pitch
+    if (camera_pitch < -camera_pitch_max) camera_pitch = -camera_pitch_max;
+    if (camera_pitch > camera_pitch_max) camera_pitch = camera_pitch_max;
+}
+
+static void mouse_button(int button, int state, int x, int y) {
+    if (button == GLUT_LEFT_BUTTON) {
+        if (state == GLUT_DOWN) {
+            mouse_locked = true;
+            // Center mouse for more room to move
+            int width, height;
+            glutGet(&GLUT_WINDOW_WIDTH);
+            glutGet(&GLUT_WINDOW_HEIGHT);
+            // NOTE: On Windows with GLUT we can't easily set cursor pos,
+            // so we rely on the motion callback tracking deltas.
+        } else {
+            mouse_locked = false;
+        }
+    }
 }
 
 static inline unsigned add_box(float mass, float cx, float cy, float cz) {
@@ -202,12 +352,14 @@ static void render() {
 		
 		glLoadMatrixf(m);
 	}
-	
-	glTranslatef(0.0f, 0.0f, -75.0f);
-	
-	// Switch to model matrix.
+
+	// Switch to modelview matrix and apply camera.
 	glMatrixMode(GL_MODELVIEW);
-	glLoadIdentity();
+	{
+		float view[16];
+		camera_view_matrix(view, camera_position, camera_yaw, camera_pitch);
+		glLoadMatrixf(view);
+	}
 	
 	// Setup light.
 	GLfloat light_ambient[] = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -325,6 +477,7 @@ static void simulate() {
 }
 
 static void timer(int) {
+	camera_update(1.0f / 60.0f);
 	glutPostRedisplay();
 	glutTimerFunc(16, timer, 0);
 	simulate();
@@ -434,7 +587,15 @@ int main(int argc, const char* argv[]) {
 	glutInitWindowSize(1024, 600);
 	glutCreateWindow("nudge");
 	glutDisplayFunc(render);
-	
+	glutKeyboardFunc(key_down);
+	glutKeyboardUpFunc(key_up);
+	glutSpecialFunc(special_key_down);
+	glutSpecialUpFunc(special_key_up);
+	glutMotionFunc(mouse_motion);
+	glutMouseFunc(mouse_button);
+
+	printf("Controls: click to lock mouse | WASD move | Shift sprint | Esc quit\n");
+
 	timer(0);
 	
 	glutMainLoop();
