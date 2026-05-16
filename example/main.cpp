@@ -56,7 +56,7 @@ static bool mouse_locked = false;
 
 // Camera settings
 static const float camera_move_speed = 40.0f;
-static const float camera_mouse_sensitivity = 0.003f;
+static const float camera_mouse_sensitivity = 0.0008f;
 static const float camera_pitch_max = 1.5f;  // ~85 degrees
 
 // Key state tracked by GLUT callbacks
@@ -194,7 +194,8 @@ static void mouse_motion(int x, int y) {
     last_x = x;
     last_y = y;
 
-    camera_yaw += dx * camera_mouse_sensitivity;
+    // Right hand: mouse right → look right (negative yaw), mouse up → look up
+    camera_yaw -= dx * camera_mouse_sensitivity;
     camera_pitch -= dy * camera_mouse_sensitivity;
 
     // Clamp pitch
