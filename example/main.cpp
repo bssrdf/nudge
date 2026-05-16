@@ -56,7 +56,7 @@ static bool mouse_locked = false;
 
 // Camera settings
 static const float camera_move_speed = 40.0f;
-static const float camera_mouse_sensitivity = 0.0008f;
+static const float camera_mouse_sensitivity = 0.002f;
 static const float camera_pitch_max = 1.5f;  // ~85 degrees
 
 // Key state tracked by GLUT callbacks
