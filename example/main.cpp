@@ -56,7 +56,7 @@ static bool mouse_locked = false;
 
 // Camera settings
 static const float camera_move_speed = 40.0f;
-static const float camera_mouse_sensitivity = 0.002f;
+static const float camera_mouse_sensitivity = 0.001f;
 static const float camera_pitch_max = 1.5f;  // ~85 degrees
 
 // Key state tracked by GLUT callbacks
@@ -128,11 +128,104 @@ static inline void camera_look_target(float target[3], const float pos[3], float
     target[2] = pos[2] - cosf(yaw) * cosf(pitch);
 }
 
+static inline unsigned add_box(float mass, float cx, float cy, float cz) {
+	if (bodies.count == max_body_count || colliders.boxes.count == max_box_count)
+		return 0;
+
+	unsigned body = bodies.count++;
+	unsigned collider = colliders.boxes.count++;
+
+	float k = mass * (1.0f / 3.0f);
+
+	float kcx2 = k * cx * cx;
+	float kcy2 = k * cy * cy;
+	float kcz2 = k * cz * cz;
+
+	nudge::BodyProperties properties = {};
+	properties.mass_inverse = 1.0f / mass;
+	properties.inertia_inverse[0] = 1.0f / (kcy2 + kcz2);
+	properties.inertia_inverse[1] = 1.0f / (kcx2 + kcz2);
+	properties.inertia_inverse[2] = 1.0f / (kcx2 + kcy2);
+
+	memset(&bodies.momentum[body], 0, sizeof(bodies.momentum[body]));
+	bodies.idle_counters[body] = 0;
+	bodies.properties[body] = properties;
+	bodies.transforms[body] = identity_transform;
+
+	colliders.boxes.transforms[collider] = identity_transform;
+	colliders.boxes.transforms[collider].body = body;
+
+	colliders.boxes.data[collider].size[0] = cx;
+	colliders.boxes.data[collider].size[1] = cy;
+	colliders.boxes.data[collider].size[2] = cz;
+	colliders.boxes.tags[collider] = collider;
+
+	return body;
+}
+
+static inline unsigned add_sphere(float mass, float radius) {
+	if (bodies.count == max_body_count || colliders.spheres.count == max_sphere_count)
+		return 0;
+
+	unsigned body = bodies.count++;
+	unsigned collider = colliders.spheres.count++;
+
+	float k = 2.5f / (mass * radius * radius);
+
+	nudge::BodyProperties properties = {};
+	properties.mass_inverse = 1.0f / mass;
+	properties.inertia_inverse[0] = k;
+	properties.inertia_inverse[1] = k;
+	properties.inertia_inverse[2] = k;
+
+	memset(&bodies.momentum[body], 0, sizeof(bodies.momentum[body]));
+	bodies.idle_counters[body] = 0;
+	bodies.properties[body] = properties;
+	bodies.transforms[body] = identity_transform;
+
+	colliders.spheres.transforms[collider] = identity_transform;
+	colliders.spheres.transforms[collider].body = body;
+
+	colliders.spheres.data[collider].radius = radius;
+	colliders.spheres.tags[collider] = collider + max_box_count;
+
+	return body;
+}
+
+static inline void shoot_sphere() {
+    static bool sphere_shot = false;
+    if (key_state[' '] && !sphere_shot) {
+        sphere_shot = true;
+        const float radius = 1.0f;
+        const float mass = 4.18879f * radius * radius * radius;
+        unsigned body = add_sphere(mass, radius);
+        if (body) {
+            // Place sphere just in front of the camera
+            float cp = cosf(camera_pitch), sp = sinf(camera_pitch);
+            float cy = cosf(camera_yaw), sy = sinf(camera_yaw);
+            float dist = radius + 1.0f;
+            bodies.transforms[body].position[0] = camera_position[0] - sy * cp * dist;
+            bodies.transforms[body].position[1] = camera_position[1] + sp * dist;
+            bodies.transforms[body].position[2] = camera_position[2] - cy * cp * dist;
+
+            // Shoot along view direction
+            const float shoot_speed = 200.0f;
+            bodies.momentum[body].velocity[0] = -sy * cp * shoot_speed;
+            bodies.momentum[body].velocity[1] = sp * shoot_speed;
+            bodies.momentum[body].velocity[2] = -cy * cp * shoot_speed;
+            printf("[shoot] sphere body=%u radius=%.1f speed=%.0f\n", body, radius, shoot_speed);
+        }
+    }
+    if (!key_state[' ']) {
+        sphere_shot = false;
+    }
+}
+
 // Update camera position based on held keys and delta time.
 static inline void camera_update(float dt) {
     // Debug: print key states every 30 frames to verify input.
     debug_frame++;
-    if (debug_frame == 30) {
+    if (debug_frame % 30 == 0) {
         printf("[camera] pos=(%.1f,%.1f,%.1f) yaw=%.2f pitch=%.2f mouse=%d keys:w=%d s=%d a=%d d=%d\n",
                camera_position[0], camera_position[1], camera_position[2],
                camera_yaw, camera_pitch, mouse_locked,
@@ -141,33 +234,58 @@ static inline void camera_update(float dt) {
 
     if (key_state[27]) exit(0);  // Escape
 
+    shoot_sphere();
+
+    // Drop a box when 'b' is pressed (one-shot per key press)
+    static bool box_dropped = false;
+    if ((key_state['B'] || key_state['b']) && !box_dropped) {
+        box_dropped = true;
+        float sx = (float)rand() / (float)RAND_MAX * 2.0f + 0.5f;
+        float sy = (float)rand() / (float)RAND_MAX * 2.0f + 0.5f;
+        float sz = (float)rand() / (float)RAND_MAX * 2.0f + 0.5f;
+        unsigned body = add_box(8.0f * sx * sy * sz, sx, sy, sz);
+        if (body) {
+            bodies.transforms[body].position[0] = 0.0f;
+            bodies.transforms[body].position[1] = 50.0f;
+            bodies.transforms[body].position[2] = 0.0f;
+            printf("[box] dropped body=%u size=(%.2f,%.2f,%.2f)\n", body, sx, sy, sz);
+        }
+    }
+    if (!key_state['B'] && !key_state['b']) {
+        box_dropped = false;
+    }
+
     float speed = camera_move_speed * dt;
     if (key_state['X'] || key_state['x']) speed *= 3.0f;  // Hold X to sprint
 
     float cy = cosf(camera_yaw), sy = sinf(camera_yaw);
+    float cp = cosf(camera_pitch), sp = sinf(camera_pitch);
 
-    // Forward: -z in camera space (yaw only, pitch doesn't affect movement plane)
-    float forward_x = -sy;
-    float forward_z = -cy;
+    // Forward: -z in camera space (yaw + pitch for vertical movement)
+    float forward_x = -sy * cp;
+    float forward_y = sp;
+    float forward_z = -cy * cp;
 
-    // Right: +x in camera space
+    // Right: +x in camera space (yaw only, always horizontal)
     float right_x = cy;
     float right_z = -sy;
 
-    float dx = 0.0f, dz = 0.0f;
-    if (key_state['W'] || key_state['w']) { dx += forward_x; dz += forward_z; }
-    if (key_state['S'] || key_state['s']) { dx -= forward_x; dz -= forward_z; }
+    float dx = 0.0f, dy = 0.0f, dz = 0.0f;
+    if (key_state['W'] || key_state['w']) { dx += forward_x; dy += forward_y; dz += forward_z; }
+    if (key_state['S'] || key_state['s']) { dx -= forward_x; dy -= forward_y; dz -= forward_z; }
     if (key_state['A'] || key_state['a']) { dx -= right_x; dz -= right_z; }
     if (key_state['D'] || key_state['d']) { dx += right_x; dz += right_z; }
 
     // Normalize if diagonal
-    float len = sqrtf(dx * dx + dz * dz);
+    float len = sqrtf(dx * dx + dy * dy + dz * dz);
     if (len > 0.001f) {
         dx = (dx / len) * speed;
+        dy = (dy / len) * speed;
         dz = (dz / len) * speed;
     }
 
     camera_position[0] += dx;
+    camera_position[1] += dy;
     camera_position[2] += dz;
 }
 
@@ -184,15 +302,21 @@ static void key_up(unsigned char key, int, int) {
 }
 
 static void mouse_motion(int x, int y) {
-    if (!mouse_locked) return;
+    //if (!mouse_locked) return;
 
     static int last_x = -1, last_y = -1;
-    if (last_x < 0) { last_x = x; last_y = y; return; }
+    if (last_x < 0 || last_y < 0) { 
+		//printf("lats x < 0 %d, %d\n", last_x, x);
+		last_x = x; last_y = y; 		
+	    return; 
+	}
 
     int dx = x - last_x;
     int dy = y - last_y;
     last_x = x;
     last_y = y;
+
+	//printf("lats x,y  %d, %d x, y %d %d dx,dy %d %d\n", last_x, last_y, x, y, dx, dy);
 
     // Right hand: mouse right → look right (negative yaw), mouse up → look up
     camera_yaw -= dx * camera_mouse_sensitivity;
@@ -209,74 +333,12 @@ static void mouse_button(int button, int state, int x, int y) {
         printf("[mouse] locked=%d\n", mouse_locked);
     }
     // When unlocking, reset last position to avoid jump
-    if (!mouse_locked) {
+    //if (!mouse_locked) {
         mouse_motion(x, y);  // resets static last_x/last_y implicitly on next call
-    }
+    //}
 }
 
-static inline unsigned add_box(float mass, float cx, float cy, float cz) {
-	if (bodies.count == max_body_count || colliders.boxes.count == max_box_count)
-		return 0;
-	
-	unsigned body = bodies.count++;
-	unsigned collider = colliders.boxes.count++;
-	
-	float k = mass * (1.0f/3.0f);
-	
-	float kcx2 = k*cx*cx;
-	float kcy2 = k*cy*cy;
-	float kcz2 = k*cz*cz;
-	
-	nudge::BodyProperties properties = {};
-	properties.mass_inverse = 1.0f / mass;
-	properties.inertia_inverse[0] = 1.0f / (kcy2+kcz2);
-	properties.inertia_inverse[1] = 1.0f / (kcx2+kcz2);
-	properties.inertia_inverse[2] = 1.0f / (kcx2+kcy2);
-	
-	memset(&bodies.momentum[body], 0, sizeof(bodies.momentum[body]));
-	bodies.idle_counters[body] = 0;
-	bodies.properties[body] = properties;
-	bodies.transforms[body] = identity_transform;
-	
-	colliders.boxes.transforms[collider] = identity_transform;
-	colliders.boxes.transforms[collider].body = body;
-	
-	colliders.boxes.data[collider].size[0] = cx;
-	colliders.boxes.data[collider].size[1] = cy;
-	colliders.boxes.data[collider].size[2] = cz;
-	colliders.boxes.tags[collider] = collider;
-	
-	return body;
-}
 
-static inline unsigned add_sphere(float mass, float radius) {
-	if (bodies.count == max_body_count || colliders.spheres.count == max_sphere_count)
-		return 0;
-	
-	unsigned body = bodies.count++;
-	unsigned collider = colliders.spheres.count++;
-	
-	float k = 2.5f / (mass*radius*radius);
-	
-	nudge::BodyProperties properties = {};
-	properties.mass_inverse = 1.0f / mass;
-	properties.inertia_inverse[0] = k;
-	properties.inertia_inverse[1] = k;
-	properties.inertia_inverse[2] = k;
-	
-	memset(&bodies.momentum[body], 0, sizeof(bodies.momentum[body]));
-	bodies.idle_counters[body] = 0;
-	bodies.properties[body] = properties;
-	bodies.transforms[body] = identity_transform;
-	
-	colliders.spheres.transforms[collider] = identity_transform;
-	colliders.spheres.transforms[collider].body = body;
-	
-	colliders.spheres.data[collider].radius = radius;
-	colliders.spheres.tags[collider] = collider + max_box_count;
-	
-	return body;
-}
 
 static void render() {
 	glEnable(GL_DEPTH_TEST);
@@ -560,7 +622,7 @@ int main(int argc, const char* argv[]) {
 	glutPassiveMotionFunc(mouse_motion);
 	glutMouseFunc(mouse_button);
 
-	printf("Controls: click to lock/unlock mouse | WASD move | X sprint | Esc quit\n");
+	printf("Controls: click to lock/unlock mouse | WASD move (W/S follows pitch) | X sprint | B drop box | Space shoot sphere | Esc quit\n");
 	printf("[debug] key states printed every 30 frames\n");
 
 	timer(0);
