@@ -118,45 +118,26 @@ static inline void matrix(float r[16], const float s[3], const float q[4], const
 	r[15] = 1.0f;
 }
 
-// Build a view matrix from camera position, yaw, and pitch.
-static inline void camera_view_matrix(float m[16], const float pos[3], float yaw, float pitch) {
-    float cy = cosf(yaw), sy = sinf(yaw);
-    float cp = cosf(pitch), sp = sinf(pitch);
-
-    // Forward and right vectors
-    float fx = -sy * cp;
-    float fy = sp;
-    float fz = -cy * cp;
-
-    // Right vector (cross of forward and world up)
-    float rx = cy;
-    float ry = 0.0f;
-    float rz = -sy;
-
-    // Up vector (cross of right and forward)
-    float ux = sy * sp;
-    float uy = cp;
-    float uz = cy * sp;
-
-    m[0] = rx; m[1] = ux; m[2] = fx; m[3] = 0.0f;
-    m[4] = ry; m[5] = uy; m[6] = fy; m[7] = 0.0f;
-    m[8] = rz; m[9] = uz; m[10] = fz; m[11] = 0.0f;
-    m[12] = -(rx * pos[0] + ry * pos[1] + rz * pos[2]);
-    m[13] = -(ux * pos[0] + uy * pos[1] + uz * pos[2]);
-    m[14] = -(fx * pos[0] + fy * pos[1] + fz * pos[2]);
-    m[15] = 1.0f;
+// Compute the camera's look-at target from yaw and pitch.
+static inline void camera_look_target(float target[3], const float pos[3], float yaw, float pitch) {
+    target[0] = pos[0] - sinf(yaw) * cosf(pitch);
+    target[1] = pos[1] + sinf(pitch);
+    target[2] = pos[2] - cosf(yaw) * cosf(pitch);
 }
 
 // Update camera position based on held keys and delta time.
 static inline void camera_update(float dt) {
-    // Poll keys directly via Windows API (more reliable than GLUT callbacks)
-    bool w = GetAsyncKeyState('W') & 0x8000;
-    bool s = GetAsyncKeyState('S') & 0x8000;
-    bool a = GetAsyncKeyState('A') & 0x8000;
-    bool d = GetAsyncKeyState('D') & 0x8000;
-    bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
-    
-    if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) exit(0);
+    // Poll keys directly via Windows API.
+    // GetAsyncKeyState returns negative SHORT when key is held down.
+    #define KEY(vk) (GetAsyncKeyState(vk) < 0)
+
+    bool w = KEY('W');
+    bool s = KEY('S');
+    bool a = KEY('A');
+    bool d = KEY('D');
+    bool shift = KEY(VK_SHIFT);
+
+    if (KEY(VK_ESCAPE)) exit(0);
 
     float speed = camera_move_speed * dt;
     if (shift) speed *= 3.0f;
@@ -186,6 +167,8 @@ static inline void camera_update(float dt) {
 
     camera_position[0] += dx;
     camera_position[2] += dz;
+
+    #undef KEY
 }
 
 static void mouse_motion(int x, int y) {
@@ -314,14 +297,19 @@ static void render() {
 		glLoadMatrixf(m);
 	}
 
-	// Switch to modelview matrix and apply camera.
+	// Switch to modelview and set up camera with gluLookAt.
 	glMatrixMode(GL_MODELVIEW);
+	glLoadIdentity();
 	{
-		float view[16];
-		camera_view_matrix(view, camera_position, camera_yaw, camera_pitch);
-		glLoadMatrixf(view);
+		float target[3];
+		camera_look_target(target, camera_position, camera_yaw, camera_pitch);
+		gluLookAt(
+			camera_position[0], camera_position[1], camera_position[2],
+			target[0], target[1], target[2],
+			0.0f, 1.0f, 0.0f  // up vector
+		);
 	}
-	
+
 	// Setup light.
 	GLfloat light_ambient[] = { 1.0f, 1.0f, 1.0f, 1.0f };
 	GLfloat light_diffuse[] = { 1.0f, 1.0f, 1.0f, 1.0f };
@@ -333,49 +321,53 @@ static void render() {
 	// Render boxes.
 	for (unsigned i = 0; i < colliders.boxes.count; ++i) {
 		unsigned body = colliders.boxes.transforms[i].body;
-		
+
 		float scale[3];
 		float rotation[4];
 		float position[3];
-		
+
 		memcpy(scale, colliders.boxes.data[i].size, sizeof(scale));
-		
+
 		quaternion_concat(rotation, bodies.transforms[body].rotation, colliders.boxes.transforms[i].rotation);
 		quaternion_transform(position, bodies.transforms[body].rotation, colliders.boxes.transforms[i].position);
-		
+
 		position[0] += bodies.transforms[body].position[0];
 		position[1] += bodies.transforms[body].position[1];
 		position[2] += bodies.transforms[body].position[2];
-		
+
 		float m[16];
 		matrix(m, scale, rotation, position);
-		
-		glLoadMatrixf(m);
+
+		glPushMatrix();
+		glMultMatrixf(m);
 		glutSolidCube(2.0f);
+		glPopMatrix();
 	}
-	
+
 	// Render spheres.
 	for (unsigned i = 0; i < colliders.spheres.count; ++i) {
 		unsigned body = colliders.spheres.transforms[i].body;
-		
+
 		float scale[3];
 		float rotation[4];
 		float position[3];
-		
+
 		scale[0] = scale[1] = scale[2] = colliders.spheres.data[i].radius;
-		
+
 		quaternion_concat(rotation, bodies.transforms[body].rotation, colliders.spheres.transforms[i].rotation);
 		quaternion_transform(position, bodies.transforms[body].rotation, colliders.spheres.transforms[i].position);
-		
+
 		position[0] += bodies.transforms[body].position[0];
 		position[1] += bodies.transforms[body].position[1];
 		position[2] += bodies.transforms[body].position[2];
-		
+
 		float m[16];
 		matrix(m, scale, rotation, position);
-		
-		glLoadMatrixf(m);
+
+		glPushMatrix();
+		glMultMatrixf(m);
 		glutSolidSphere(1.0f, 16, 8);
+		glPopMatrix();
 	}
 	
 	glutSwapBuffers();
