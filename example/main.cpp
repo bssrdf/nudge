@@ -33,6 +33,7 @@
 #else
 #include <GLUT/glut.h>
 #include <gl/gl.h>
+#include <windows.h>
 #endif
 
 static const unsigned max_body_count = 2048;
@@ -53,13 +54,6 @@ static float camera_position[3] = { 0.0f, 5.0f, 20.0f };
 static float camera_yaw = 0.0f;    // radians, horizontal rotation
 static float camera_pitch = 0.0f;  // radians, vertical rotation
 static bool mouse_locked = false;
-
-// Keyboard state
-static bool key_w = false;
-static bool key_s = false;
-static bool key_a = false;
-static bool key_d = false;
-static bool key_shift = false;
 
 // Camera settings
 static const float camera_move_speed = 20.0f;
@@ -155,8 +149,17 @@ static inline void camera_view_matrix(float m[16], const float pos[3], float yaw
 
 // Update camera position based on held keys and delta time.
 static inline void camera_update(float dt) {
+    // Poll keys directly via Windows API (more reliable than GLUT callbacks)
+    bool w = GetAsyncKeyState('W') & 0x8000;
+    bool s = GetAsyncKeyState('S') & 0x8000;
+    bool a = GetAsyncKeyState('A') & 0x8000;
+    bool d = GetAsyncKeyState('D') & 0x8000;
+    bool shift = (GetAsyncKeyState(VK_SHIFT) & 0x8000) != 0;
+    
+    if (GetAsyncKeyState(VK_ESCAPE) & 0x8000) exit(0);
+
     float speed = camera_move_speed * dt;
-    if (key_shift) speed *= 3.0f;
+    if (shift) speed *= 3.0f;
 
     float cy = cosf(camera_yaw), sy = sinf(camera_yaw);
 
@@ -169,10 +172,10 @@ static inline void camera_update(float dt) {
     float right_z = -sy;
 
     float dx = 0.0f, dz = 0.0f;
-    if (key_w) { dx += forward_x; dz += forward_z; }
-    if (key_s) { dx -= forward_x; dz -= forward_z; }
-    if (key_a) { dx -= right_x; dz -= right_z; }
-    if (key_d) { dx += right_x; dz += right_z; }
+    if (w) { dx += forward_x; dz += forward_z; }
+    if (s) { dx -= forward_x; dz -= forward_z; }
+    if (a) { dx -= right_x; dz -= right_z; }
+    if (d) { dx += right_x; dz += right_z; }
 
     // Normalize if diagonal
     float len = sqrtf(dx * dx + dz * dz);
@@ -183,30 +186,6 @@ static inline void camera_update(float dt) {
 
     camera_position[0] += dx;
     camera_position[2] += dz;
-
-    // Allow vertical movement with Q/E if needed (optional, keeping simple)
-    // camera_position[1] can be adjusted with key_w/s on slopes, etc.
-}
-
-static void key_down(unsigned char key, int, int) {
-    switch (key) {
-        case 'w': case 'W': key_w = true; break;
-        case 's': case 'S': key_s = true; break;
-        case 'a': case 'A': key_a = true; break;
-        case 'd': case 'D': key_d = true; break;
-        case 16: key_shift = true; break;  // Shift
-        case 27: exit(0); break;  // Escape
-    }
-}
-
-static void key_up(unsigned char key, int, int) {
-    switch (key) {
-        case 'w': case 'W': key_w = false; break;
-        case 's': case 'S': key_s = false; break;
-        case 'a': case 'A': key_a = false; break;
-        case 'd': case 'D': key_d = false; break;
-        case 16: key_shift = false; break;  // Shift
-    }
 }
 
 static void mouse_motion(int x, int y) {
@@ -569,8 +548,6 @@ int main(int argc, const char* argv[]) {
 	glutInitWindowSize(1024, 600);
 	glutCreateWindow("nudge");
 	glutDisplayFunc(render);
-	glutKeyboardFunc(key_down);
-	glutKeyboardUpFunc(key_up);
 	glutMotionFunc(mouse_motion);
 	glutMouseFunc(mouse_button);
 
