@@ -1,0 +1,51 @@
+# Compiled objects
+*.o
+*.obj
+*.iobj
+*.ipdb
+*.pdb
+
+# Executables
+*.exe
+*.dll
+*.so
+*.a
+*.dylib
+
+# Build directories
+build/
+cmake-build-*/
+out/
+example/win/x64/
+
+# IDE files
+.vscode/
+.vs/
+*.suo
+*.user
+*.opensdf
+*.sdf
+*.ipch/
+*.vcxproj.user
+
+# OS files
+.DS_Store
+Thumbs.db
+*.lnk
+
+# Binary assets
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.bmp
+*.ico
+*.pdf
+*.zip
+*.tar.gz
+*.7z
+*.rar
+
+# Core dumps
+core
+core.*
