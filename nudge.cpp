@@ -36,7 +36,9 @@
 #define NUDGE_FORCEINLINE inline __attribute__((always_inline))
 #endif
 
-#ifdef __AVX2__
+#ifdef __AVX512F__
+#define NUDGE_SIMDV_WIDTH 512
+#elif defined(__AVX2__)
 #define NUDGE_SIMDV_WIDTH 256
 #else
 #define NUDGE_SIMDV_WIDTH 128
@@ -44,7 +46,19 @@
 
 #define NUDGE_ARENA_SCOPE(A) Arena& scope_arena_##A = A; Arena A = scope_arena_##A
 
+#if NUDGE_SIMDV_WIDTH == 512
+#pragma message("Nudge: compiling with AVX-512 (512-bit SIMD)")
+#elif NUDGE_SIMDV_WIDTH == 256
+#pragma message("Nudge: compiling with AVX2 (256-bit SIMD)")
+#else
+#pragma message("Nudge: compiling with SSE2 (128-bit SIMD)")
+#endif
+
 namespace nudge {
+
+#ifndef NUDGE_ARENA_SCOPE
+#define NUDGE_ARENA_SCOPE(x)
+#endif
 
 static const float allowed_penetration = 1e-3f;
 static const float bias_factor = 2.0f;
@@ -53,10 +67,17 @@ static const float bias_factor = 2.0f;
 #define NUDGE_SIMDV_ALIGNED NUDGE_ALIGNED(16)
 static const unsigned simdv_width32 = 4;
 static const unsigned simdv_width32_log2 = 2;
+static const unsigned simdv_alignment = 16;
 #elif NUDGE_SIMDV_WIDTH == 256
 #define NUDGE_SIMDV_ALIGNED NUDGE_ALIGNED(32)
 static const unsigned simdv_width32 = 8;
 static const unsigned simdv_width32_log2 = 3;
+static const unsigned simdv_alignment = 32;
+#elif NUDGE_SIMDV_WIDTH == 512
+#define NUDGE_SIMDV_ALIGNED NUDGE_ALIGNED(64)
+static const unsigned simdv_width32 = 16;
+static const unsigned simdv_width32_log2 = 4;
+static const unsigned simdv_alignment = 64;
 #endif
 
 #ifdef _WIN32
@@ -695,6 +716,7 @@ namespace simd_int32 {
 	NUDGE_FORCEINLINE int32_t extract_first_int(simd8_int32 x) {
 		return _mm_cvtsi128_si32(_mm256_castsi256_si128(x));
 	}
+	NUDGE_FORCEINLINE int32_t extract_first_int32(simd8_int32 x) { return extract_first_int(x); }
 	
 	NUDGE_FORCEINLINE simd8_int32 zero8() {
 		return _mm256_setzero_si256();
@@ -777,6 +799,113 @@ namespace simd_int32 {
 	
 	NUDGE_FORCEINLINE simd8_float tofloat(simd8_int32 x) {
 		return _mm256_cvtepi32_ps(x);
+	}
+}
+#endif
+
+#ifdef __AVX512F__
+typedef __m512 simd16_float;
+typedef __m512i simd16_int32;
+
+inline __m512 operator - (__m512 a) { return _mm512_sub_ps(_mm512_setzero_ps(), a); }
+inline __m512 operator + (__m512 a, __m512 b) { return _mm512_add_ps(a, b); }
+inline __m512 operator - (__m512 a, __m512 b) { return _mm512_sub_ps(a, b); }
+inline __m512 operator * (__m512 a, __m512 b) { return _mm512_mul_ps(a, b); }
+inline __m512 operator / (__m512 a, __m512 b) { return _mm512_div_ps(a, b); }
+inline __m512& operator += (__m512& a, __m512 b) { return a = _mm512_add_ps(a, b); }
+inline __m512& operator -= (__m512& a, __m512 b) { return a = _mm512_sub_ps(a, b); }
+inline __m512& operator *= (__m512& a, __m512 b) { return a = _mm512_mul_ps(a, b); }
+inline __m512& operator /= (__m512& a, __m512 b) { return a = _mm512_div_ps(a, b); }
+
+namespace simd512 {
+	NUDGE_FORCEINLINE simd16_float broadcast(simd8_float x) { __m512 t = _mm512_castps256_ps512(x); return _mm512_insertf32x8(t, x, 1); }
+	NUDGE_FORCEINLINE simd16_int32 broadcast(simd8_int32 x) { __m512i t = _mm512_castsi256_si512(x); return _mm512_inserti32x8(t, x, 1); }
+	NUDGE_FORCEINLINE simd16_float broadcast(simd4_float x) { return _mm512_broadcast_f32x4(_mm_loadu_ps(reinterpret_cast<const float*>(&x))); }
+	NUDGE_FORCEINLINE simd16_int32 broadcast(simd4_int32 x) { return _mm512_broadcast_i32x4(_mm_loadu_si128(reinterpret_cast<const __m128i*>(&x))); }
+	template<unsigned i0, unsigned i1> NUDGE_FORCEINLINE simd16_float shuffle128(simd16_float x) { return _mm512_shuffle_f32x4(x, x, _MM_SHUFFLE(i1, i1, i0, i0)); }
+	template<unsigned i0, unsigned i1> NUDGE_FORCEINLINE simd16_int32 shuffle128(simd16_int32 x) { return _mm512_shuffle_i32x4(x, x, _MM_SHUFFLE(i1, i1, i0, i0)); }
+}
+
+namespace simd {
+	NUDGE_FORCEINLINE simd16_float concat(simd8_float x, simd8_float y) { __m512 t = _mm512_castps256_ps512(x); return _mm512_insertf32x8(t, y, 1); }
+	NUDGE_FORCEINLINE simd8_float extract_low(simd16_float x) { return _mm512_castps512_ps256(x); }
+	NUDGE_FORCEINLINE simd8_float extract_high(simd16_float x) { return _mm512_extractf32x8_ps(x, 1); }
+	NUDGE_FORCEINLINE simd8_int32 extract_low(simd16_int32 x) { return _mm512_castsi512_si256(x); }
+	NUDGE_FORCEINLINE simd8_int32 extract_high(simd16_int32 x) { return _mm512_extracti32x8_epi32(x, 1); }
+	NUDGE_FORCEINLINE simd16_int32 concat(simd8_int32 x, simd8_int32 y) { __m512i t = _mm512_castsi256_si512(x); return _mm512_inserti32x8(t, y, 1); }
+	NUDGE_FORCEINLINE unsigned signmask32(__m512 x) { return _mm512_movepi32_mask(_mm512_castps_si512(x)); }
+	NUDGE_FORCEINLINE unsigned signmask32(__m512i x) { return _mm512_movepi32_mask(x); }
+	NUDGE_FORCEINLINE __m512 bitwise_xor(__m512 x, __m512 y) { return _mm512_xor_ps(x, y); }
+	NUDGE_FORCEINLINE __m512 bitwise_or(__m512 x, __m512 y) { return _mm512_or_ps(x, y); }
+	NUDGE_FORCEINLINE __m512 bitwise_and(__m512 x, __m512 y) { return _mm512_and_ps(x, y); }
+	NUDGE_FORCEINLINE __m512 bitwise_notand(__m512 x, __m512 y) { return _mm512_andnot_ps(x, y); }
+	NUDGE_FORCEINLINE __m512i bitwise_xor(__m512i x, __m512i y) { return _mm512_xor_si512(x, y); }
+	NUDGE_FORCEINLINE __m512i bitwise_or(__m512i x, __m512i y) { return _mm512_or_si512(x, y); }
+	NUDGE_FORCEINLINE __m512i bitwise_and(__m512i x, __m512i y) { return _mm512_and_si512(x, y); }
+	NUDGE_FORCEINLINE __m512i bitwise_notand(__m512i x, __m512i y) { return _mm512_andnot_si512(x, y); }
+	NUDGE_FORCEINLINE __m512i blendv32(__m512i x, __m512i y, __m512i s) { return _mm512_castps_si512(_mm512_mask_blend_ps(_mm512_movepi32_mask(s), _mm512_castsi512_ps(x), _mm512_castsi512_ps(y))); }
+}
+
+namespace simd_float {
+	NUDGE_FORCEINLINE float extract_first_float(simd16_float x) { return _mm_cvtss_f32(_mm512_castps512_ps128(x)); }
+	NUDGE_FORCEINLINE simd16_float zero16() { return _mm512_setzero_ps(); }
+	NUDGE_FORCEINLINE simd16_float make16(float x) { return _mm512_set1_ps(x); }
+	NUDGE_FORCEINLINE simd16_float make16(float a0,float a1,float a2,float a3,float a4,float a5,float a6,float a7,float a8,float a9,float a10,float a11,float a12,float a13,float a14,float a15) { return _mm512_set_ps(a15,a14,a13,a12,a11,a10,a9,a8,a7,a6,a5,a4,a3,a2,a1,a0); }
+	NUDGE_FORCEINLINE simd16_float broadcast_load16(const float* p) { return _mm512_broadcast_f32x4(_mm_loadu_ps(p)); }
+	NUDGE_FORCEINLINE simd16_float load16(const float* p) { return _mm512_load_ps(p); }
+	NUDGE_FORCEINLINE simd16_float loadu16(const float* p) { return _mm512_loadu_ps(p); }
+	NUDGE_FORCEINLINE void store16(float* p, simd16_float x) { _mm512_store_ps(p, x); }
+	NUDGE_FORCEINLINE void storeu16(float* p, simd16_float x) { _mm512_storeu_ps(p, x); }
+	NUDGE_FORCEINLINE simd16_float madd(simd16_float x, simd16_float y, simd16_float z) { return _mm512_add_ps(_mm512_mul_ps(x, y), z); }
+	NUDGE_FORCEINLINE simd16_float msub(simd16_float x, simd16_float y, simd16_float z) { return _mm512_sub_ps(_mm512_mul_ps(x, y), z); }
+	NUDGE_FORCEINLINE simd16_float blendv32(simd16_float x, simd16_float y, simd16_float s) { return _mm512_mask_blend_ps(_mm512_movepi32_mask(_mm512_castps_si512(s)), x, y); }
+	NUDGE_FORCEINLINE simd16_int32 blendv32(simd16_int32 x, simd16_int32 y, simd16_int32 s) { return _mm512_castps_si512(_mm512_mask_blend_ps(_mm512_movepi32_mask(s), _mm512_castsi512_ps(x), _mm512_castsi512_ps(y))); }
+	NUDGE_FORCEINLINE simd16_float max(simd16_float x, simd16_float y) { return _mm512_max_ps(x, y); }
+	NUDGE_FORCEINLINE simd16_float min(simd16_float x, simd16_float y) { return _mm512_min_ps(x, y); }
+	NUDGE_FORCEINLINE simd16_float rsqrt(simd16_float x) { return _mm512_rsqrt14_ps(x); }
+	NUDGE_FORCEINLINE simd16_float sqrt(simd16_float x) { return _mm512_sqrt_ps(x); }
+	NUDGE_FORCEINLINE simd16_float recpeq(simd16_float x) { return _mm512_rcp14_ps(x); }
+	NUDGE_FORCEINLINE simd16_float cmp_gt(simd16_float x, simd16_float y) { return _mm512_mask_blend_ps(_mm512_cmplt_ps_mask(y, x), y, x); }
+	NUDGE_FORCEINLINE simd16_float cmp_lt(simd16_float x, simd16_float y) { return _mm512_mask_blend_ps(_mm512_cmplt_ps_mask(x, y), y, x); }
+	NUDGE_FORCEINLINE simd16_float cmp_eq(simd16_float x, simd16_float y) { return _mm512_mask_blend_ps(_mm512_cmpeq_ps_mask(x, y), y, x); }
+	NUDGE_FORCEINLINE simd16_float cmp_neq(simd16_float x, simd16_float y) { return _mm512_mask_blend_ps(~_mm512_cmpeq_ps_mask(x, y), y, x); }
+	NUDGE_FORCEINLINE simd16_float recip(simd16_float x) { return _mm512_rcp14_ps(x); }
+	NUDGE_FORCEINLINE simd16_float abs(simd16_float x) { return _mm512_and_ps(x, _mm512_castsi512_ps(_mm512_set1_epi32(0x7FFFFFFF))); }
+	NUDGE_FORCEINLINE simd16_int32 toint(simd16_float x) { return _mm512_cvttps_epi32(x); }
+}
+
+namespace simd_int32 {
+	NUDGE_FORCEINLINE int32_t extract_first_int32(simd16_int32 x) { return _mm_cvtsi128_si32(_mm512_castsi512_si128(x)); }
+	NUDGE_FORCEINLINE simd16_int32 zero16() { return _mm512_setzero_si512(); }
+	NUDGE_FORCEINLINE simd16_int32 make16(int32_t x) { return _mm512_set1_epi32(x); }
+	NUDGE_FORCEINLINE simd16_int32 make16(int32_t a0,int32_t a1,int32_t a2,int32_t a3,int32_t a4,int32_t a5,int32_t a6,int32_t a7,int32_t a8,int32_t a9,int32_t a10,int32_t a11,int32_t a12,int32_t a13,int32_t a14,int32_t a15) { return _mm512_set_epi32(a15,a14,a13,a12,a11,a10,a9,a8,a7,a6,a5,a4,a3,a2,a1,a0); }
+	NUDGE_FORCEINLINE simd16_int32 broadcast_load16(const int32_t* p) { return _mm512_set1_epi32(*p); }
+	NUDGE_FORCEINLINE simd16_int32 load16(const int32_t* p) { return _mm512_load_si512(p); }
+	NUDGE_FORCEINLINE simd16_int32 loadu16(const int32_t* p) { return _mm512_loadu_si512(p); }
+	NUDGE_FORCEINLINE void store16(int32_t* p, simd16_int32 x) { _mm512_store_si512(p, x); }
+	NUDGE_FORCEINLINE void storeu16(int32_t* p, simd16_int32 x) { _mm512_storeu_si512(p, x); }
+	NUDGE_FORCEINLINE simd16_int32 cmp_eq(simd16_int32 x, simd16_int32 y) { return _mm512_maskz_set1_epi32(_mm512_cmpeq_epi32_mask(x, y), -1); }
+	NUDGE_FORCEINLINE simd16_int32 cmp_lt(simd16_int32 x, simd16_int32 y) { return _mm512_maskz_set1_epi32(_mm512_cmplt_epi32_mask(x, y), -1); }
+	NUDGE_FORCEINLINE simd16_int32 cmp_gt(simd16_int32 x, simd16_int32 y) { return _mm512_maskz_set1_epi32(_mm512_cmpgt_epi32_mask(x, y), -1); }
+	NUDGE_FORCEINLINE simd16_int32 cmp_le(simd16_int32 x, simd16_int32 y) { return _mm512_maskz_set1_epi32(~_mm512_cmpgt_epi32_mask(x, y), -1); }
+	NUDGE_FORCEINLINE simd16_int32 cmp_ge(simd16_int32 x, simd16_int32 y) { return _mm512_maskz_set1_epi32(~_mm512_cmplt_epi32_mask(x, y), -1); }
+	NUDGE_FORCEINLINE simd16_int32 min(simd16_int32 x, simd16_int32 y) { return _mm512_mask_mov_epi32(y, _mm512_cmplt_epi32_mask(x, y), x); }
+	NUDGE_FORCEINLINE simd16_int32 max(simd16_int32 x, simd16_int32 y) { return _mm512_mask_mov_epi32(x, _mm512_cmpgt_epi32_mask(x, y), y); }
+	NUDGE_FORCEINLINE simd16_float asfloat(simd16_int32 x) { return _mm512_castsi512_ps(x); }
+	NUDGE_FORCEINLINE simd16_float tofloat(simd16_int32 x) { return _mm512_cvtepi32_ps(x); }
+	NUDGE_FORCEINLINE simd16_int32 add(simd16_int32 x, simd16_int32 y) { return _mm512_add_epi32(x, y); }
+	NUDGE_FORCEINLINE simd16_int32 sub(simd16_int32 x, simd16_int32 y) { return _mm512_sub_epi32(x, y); }
+	template<unsigned bits>
+	NUDGE_FORCEINLINE simd16_int32 shift_left(simd16_int32 x) {
+		return _mm512_slli_epi32(x, bits);
+	}
+	template<unsigned bits>
+	NUDGE_FORCEINLINE simd16_int32 shift_right(simd16_int32 x) {
+		return _mm512_srli_epi32(x, bits);
+	}
+	template<unsigned bits>
+	NUDGE_FORCEINLINE simd16_int32 shift_right_arith(simd16_int32 x) {
+		return _mm512_srai_epi32(x, bits);
 	}
 }
 #endif
@@ -907,6 +1036,29 @@ namespace simd_int32 {
 		storeu8(p, x);
 	}
 }
+#elif NUDGE_SIMDV_WIDTH == 512
+typedef simd16_float simdv_float;
+typedef simd16_int32 simdv_int32;
+
+namespace simd_float {
+	NUDGE_FORCEINLINE simdv_float zerov() { return zero16(); }
+	NUDGE_FORCEINLINE simdv_float makev(float x) { return make16(x); }
+	NUDGE_FORCEINLINE simdv_float broadcast_loadv(const float* p) { return broadcast_load16(p); }
+	NUDGE_FORCEINLINE simdv_float loadv(const float* p) { return load16(p); }
+	NUDGE_FORCEINLINE simdv_float loaduv(const float* p) { return loadu16(p); }
+	NUDGE_FORCEINLINE void storev(float* p, simdv_float x) { store16(p, x); }
+	NUDGE_FORCEINLINE void storeuv(float* p, simdv_float x) { storeu16(p, x); }
+}
+
+namespace simd_int32 {
+	NUDGE_FORCEINLINE simdv_int32 zerov() { return zero16(); }
+	NUDGE_FORCEINLINE simdv_int32 makev(int32_t x) { return make16(x); }
+	NUDGE_FORCEINLINE simdv_int32 broadcast_loadv(const int32_t* p) { return broadcast_load16(p); }
+	NUDGE_FORCEINLINE simdv_int32 loadv(const int32_t* p) { return load16(p); }
+	NUDGE_FORCEINLINE simdv_int32 loaduv(const int32_t* p) { return loadu16(p); }
+	NUDGE_FORCEINLINE void storev(int32_t* p, simdv_int32 x) { store16(p, x); }
+	NUDGE_FORCEINLINE void storeuv(int32_t* p, simdv_int32 x) { storeu16(p, x); }
+}
 #endif
 
 namespace simd_aos {
@@ -949,8 +1101,22 @@ namespace simd_soa {
 		y *= f;
 		z *= f;
 	}
+#ifdef __AVX512F__
+	NUDGE_FORCEINLINE void cross(simd16_float ax, simd16_float ay, simd16_float az, simd16_float bx, simd16_float by, simd16_float bz, simd16_float& rx, simd16_float& ry, simd16_float& rz) {
+		rx = ay*bz - az*by;
+		ry = az*bx - ax*bz;
+		rz = ax*by - ay*bx;
+	}
+	NUDGE_FORCEINLINE void normalize(simd16_float& x, simd16_float& y, simd16_float& z) {
+		simd16_float f = simd_float::rsqrt(x*x + y*y + z*z);
+		x *= f;
+		y *= f;
+		z *= f;
+	}
+#endif
 #endif
 }
+
 
 namespace {
 	struct float3 {
@@ -1873,8 +2039,8 @@ static unsigned box_box_collide(uint32_t* pairs, unsigned pair_count, BoxCollide
 				const float* transformed_z = quads + 4*a_face;
 				
 				// Find support points for the overlap between the quad faces in two dimensions.
-				NUDGE_ALIGNED(32) float support[16*3];
-				NUDGE_ALIGNED(32) uint32_t support_tags[16];
+				NUDGE_SIMDV_ALIGNED float support[16*3];
+				NUDGE_SIMDV_ALIGNED uint32_t support_tags[16];
 				unsigned mask; // Indicates valid points.
 				{
 					float* support_x = support + 0;
@@ -2077,7 +2243,7 @@ static unsigned box_box_collide(uint32_t* pairs, unsigned pair_count, BoxCollide
 				simd4_float plane = simd128::concat2x32<0,1,0,1>(simd::bitwise_xor(zn, simd_float::make4(-0.0f)), simd_aos::dot(c_transformed, zn));
 				plane *= simd_float::make4(1.0f)/simd128::shuffle32<2,2,2,2>(zn);
 				
-				NUDGE_ALIGNED(32) float penetrations[16];
+				NUDGE_SIMDV_ALIGNED float penetrations[16];
 				
 				simdv_float z_sign = simd_float::zerov();
 				
@@ -2087,6 +2253,9 @@ static unsigned box_box_collide(uint32_t* pairs, unsigned pair_count, BoxCollide
 #if NUDGE_SIMDV_WIDTH == 256
 				simdv_float penetration_offset = simd256::broadcast(simd128::shuffle32<2,2,2,2>(a_size_transformed));
 				simdv_float plane256 = simd256::broadcast(plane);
+#elif NUDGE_SIMDV_WIDTH == 512
+				simdv_float penetration_offset = simd512::broadcast(simd128::shuffle32<2,2,2,2>(a_size_transformed));
+				simdv_float plane256 = simd512::broadcast(plane);
 #else
 				simdv_float penetration_offset = simd128::shuffle32<2,2,2,2>(a_size_transformed);
 #endif
@@ -2095,11 +2264,21 @@ static unsigned box_box_collide(uint32_t* pairs, unsigned pair_count, BoxCollide
 				for (unsigned i = 0; i < 16; i += simdv_width32) {
 #if NUDGE_SIMDV_WIDTH == 256
 					simdv_float plane = plane256;
+#elif NUDGE_SIMDV_WIDTH == 512
+					simdv_float plane = plane256;
 #endif
 					
 					simdv_float x = simd_float::loadv(support + 0 + i);
 					simdv_float y = simd_float::loadv(support + 16 + i);
+#if NUDGE_SIMDV_WIDTH == 256
+					simd4_float pl4 = simd::extract_low(plane256);
+					simdv_float z = x*plane256 + y*simd256::broadcast(simd128::shuffle32<1,1,1,1>(pl4)) + simd256::broadcast(simd128::shuffle32<2,2,2,2>(pl4));
+#elif NUDGE_SIMDV_WIDTH == 512
+					simd4_float pl4 = simd::extract_low(simd::extract_low(plane256));
+					simdv_float z = x*simd512::broadcast(simd128::shuffle32<0,0,0,0>(pl4)) + y*simd512::broadcast(simd128::shuffle32<1,1,1,1>(pl4)) + simd512::broadcast(simd128::shuffle32<2,2,2,2>(pl4));
+#else
 					simdv_float z = x*simd128::shuffle32<0,0,0,0>(plane) + y*simd128::shuffle32<1,1,1,1>(plane) + simd128::shuffle32<2,2,2,2>(plane);
+#endif
 					
 					simdv_float penetration = penetration_offset - simd::bitwise_xor(z, z_sign);
 					
@@ -2960,6 +3139,34 @@ NUDGE_FORCEINLINE static void load4(const float* data, const T* indices,
 	d1 = simd::concat(t1, t5);
 	d2 = simd::concat(t2, t6);
 	d3 = simd::concat(t3, t7);
+#elif NUDGE_SIMDV_WIDTH == 512
+	unsigned i0 = indices[0*index_stride]; unsigned i1 = indices[1*index_stride]; unsigned i2 = indices[2*index_stride]; unsigned i3 = indices[3*index_stride];
+	unsigned i4 = indices[4*index_stride]; unsigned i5 = indices[5*index_stride]; unsigned i6 = indices[6*index_stride]; unsigned i7 = indices[7*index_stride];
+	unsigned i8 = indices[8*index_stride]; unsigned i9 = indices[9*index_stride]; unsigned i10 = indices[10*index_stride]; unsigned i11 = indices[11*index_stride];
+	unsigned i12 = indices[12*index_stride]; unsigned i13 = indices[13*index_stride]; unsigned i14 = indices[14*index_stride]; unsigned i15 = indices[15*index_stride];
+	simd4_float t0 = simd_float::load4(data + i0*stride_in_floats);
+	simd4_float t1 = simd_float::load4(data + i4*stride_in_floats);
+	simd4_float t2 = simd_float::load4(data + i8*stride_in_floats);
+	simd4_float t3 = simd_float::load4(data + i12*stride_in_floats);
+	simd128::transpose32(t0, t1, t2, t3);
+	simd4_float t4 = simd_float::load4(data + i1*stride_in_floats);
+	simd4_float t5 = simd_float::load4(data + i5*stride_in_floats);
+	simd4_float t6 = simd_float::load4(data + i9*stride_in_floats);
+	simd4_float t7 = simd_float::load4(data + i13*stride_in_floats);
+	simd128::transpose32(t4, t5, t6, t7);
+	simd8_float r0 = simd::concat(t0, t4); simd8_float r1 = simd::concat(t1, t5); simd8_float r2 = simd::concat(t2, t6); simd8_float r3 = simd::concat(t3, t7);
+	simd4_float u0 = simd_float::load4(data + i2*stride_in_floats);
+	simd4_float u1 = simd_float::load4(data + i6*stride_in_floats);
+	simd4_float u2 = simd_float::load4(data + i10*stride_in_floats);
+	simd4_float u3 = simd_float::load4(data + i14*stride_in_floats);
+	simd128::transpose32(u0, u1, u2, u3);
+	simd4_float u4 = simd_float::load4(data + i3*stride_in_floats);
+	simd4_float u5 = simd_float::load4(data + i7*stride_in_floats);
+	simd4_float u6 = simd_float::load4(data + i11*stride_in_floats);
+	simd4_float u7 = simd_float::load4(data + i15*stride_in_floats);
+	simd128::transpose32(u4, u5, u6, u7);
+	simd8_float r4 = simd::concat(u0, u4); simd8_float r5 = simd::concat(u1, u5); simd8_float r6 = simd::concat(u2, u6); simd8_float r7 = simd::concat(u3, u7);
+	d0 = simd::concat(r0, r4); d1 = simd::concat(r1, r5); d2 = simd::concat(r2, r6); d3 = simd::concat(r3, r7);
 #else
 	unsigned i0 = indices[0*index_stride];
 	unsigned i1 = indices[1*index_stride];
@@ -2972,7 +3179,9 @@ NUDGE_FORCEINLINE static void load4(const float* data, const T* indices,
 	d3 = simd_float::load4(data + i3*stride_in_floats);
 #endif
 	
+#if NUDGE_SIMDV_WIDTH < 512
 	simd128::transpose32(d0, d1, d2, d3);
+#endif
 }
 
 template<unsigned data_stride, unsigned index_stride = 1, class T>
@@ -3011,6 +3220,35 @@ NUDGE_FORCEINLINE static void load8(const float* data, const T* indices,
 	d5 = simd256::permute128<1,3>(t1, t5);
 	d6 = simd256::permute128<1,3>(t2, t6);
 	d7 = simd256::permute128<1,3>(t3, t7);
+#elif NUDGE_SIMDV_WIDTH == 512
+	simdv_float t0 = simd_float::loadu16(data + indices[0*index_stride]*stride_in_floats);
+	simdv_float t1 = simd_float::loadu16(data + indices[1*index_stride]*stride_in_floats);
+	simdv_float t2 = simd_float::loadu16(data + indices[2*index_stride]*stride_in_floats);
+	simdv_float t3 = simd_float::loadu16(data + indices[3*index_stride]*stride_in_floats);
+	simdv_float t4 = simd_float::loadu16(data + indices[4*index_stride]*stride_in_floats);
+	simdv_float t5 = simd_float::loadu16(data + indices[5*index_stride]*stride_in_floats);
+	simdv_float t6 = simd_float::loadu16(data + indices[6*index_stride]*stride_in_floats);
+	simdv_float t7 = simd_float::loadu16(data + indices[7*index_stride]*stride_in_floats);
+	simd4_float a0=simd::extract_low(simd::extract_low(t0)),a1=simd::extract_low(simd::extract_low(t1)),a2=simd::extract_low(simd::extract_low(t2)),a3=simd::extract_low(simd::extract_low(t3));
+	simd4_float a4=simd::extract_low(simd::extract_low(t4)),a5=simd::extract_low(simd::extract_low(t5)),a6=simd::extract_low(simd::extract_low(t6)),a7=simd::extract_low(simd::extract_low(t7));
+	simd128::transpose32(a0,a1,a2,a3); simd128::transpose32(a4,a5,a6,a7);
+	simd4_float b0=simd::extract_low(simd::extract_high(t0)),b1=simd::extract_low(simd::extract_high(t1)),b2=simd::extract_low(simd::extract_high(t2)),b3=simd::extract_low(simd::extract_high(t3));
+	simd4_float b4=simd::extract_low(simd::extract_high(t4)),b5=simd::extract_low(simd::extract_high(t5)),b6=simd::extract_low(simd::extract_high(t6)),b7=simd::extract_low(simd::extract_high(t7));
+	simd128::transpose32(b0,b1,b2,b3); simd128::transpose32(b4,b5,b6,b7);
+	simd4_float c0=simd::extract_high(simd::extract_low(t0)),c1=simd::extract_high(simd::extract_low(t1)),c2=simd::extract_high(simd::extract_low(t2)),c3=simd::extract_high(simd::extract_low(t3));
+	simd4_float c4=simd::extract_high(simd::extract_low(t4)),c5=simd::extract_high(simd::extract_low(t5)),c6=simd::extract_high(simd::extract_low(t6)),c7=simd::extract_high(simd::extract_low(t7));
+	simd128::transpose32(c0,c1,c2,c3); simd128::transpose32(c4,c5,c6,c7);
+	simd4_float dd0=simd::extract_high(simd::extract_high(t0)),dd1=simd::extract_high(simd::extract_high(t1)),dd2=simd::extract_high(simd::extract_high(t2)),dd3=simd::extract_high(simd::extract_high(t3));
+	simd4_float dd4=simd::extract_high(simd::extract_high(t4)),dd5=simd::extract_high(simd::extract_high(t5)),dd6=simd::extract_high(simd::extract_high(t6)),dd7=simd::extract_high(simd::extract_high(t7));
+	simd128::transpose32(dd0,dd1,dd2,dd3); simd128::transpose32(dd4,dd5,dd6,dd7);
+	d0=simd::concat(simd::concat(a0,b0),simd::concat(c0,dd0));
+	d1=simd::concat(simd::concat(a1,b1),simd::concat(c1,dd1));
+	d2=simd::concat(simd::concat(a2,b2),simd::concat(c2,dd2));
+	d3=simd::concat(simd::concat(a3,b3),simd::concat(c3,dd3));
+	d4=simd::concat(simd::concat(a4,b4),simd::concat(c4,dd4));
+	d5=simd::concat(simd::concat(a5,b5),simd::concat(c5,dd5));
+	d6=simd::concat(simd::concat(a6,b6),simd::concat(c6,dd6));
+	d7=simd::concat(simd::concat(a7,b7),simd::concat(c7,dd7));
 #else
 	unsigned i0 = indices[0*index_stride];
 	unsigned i1 = indices[1*index_stride];
@@ -3028,8 +3266,10 @@ NUDGE_FORCEINLINE static void load8(const float* data, const T* indices,
 	d7 = simd_float::load4(data + i3*stride_in_floats + 4);
 #endif
 	
+#if NUDGE_SIMDV_WIDTH < 512
 	simd128::transpose32(d0, d1, d2, d3);
 	simd128::transpose32(d4, d5, d6, d7);
+#endif
 }
 
 template<unsigned data_stride, unsigned index_stride = 1, class T>
@@ -3071,6 +3311,43 @@ NUDGE_FORCEINLINE static void store8(float* data, const T* indices,
 	simd_float::store8(data + i5*stride_in_floats, t5);
 	simd_float::store8(data + i6*stride_in_floats, t6);
 	simd_float::store8(data + i7*stride_in_floats, t7);
+#elif NUDGE_SIMDV_WIDTH == 512
+	simd4_float a0=simd::extract_low(simd::extract_low(d0)),a1=simd::extract_low(simd::extract_low(d1)),a2=simd::extract_low(simd::extract_low(d2)),a3=simd::extract_low(simd::extract_low(d3));
+	simd4_float a4=simd::extract_low(simd::extract_low(d4)),a5=simd::extract_low(simd::extract_low(d5)),a6=simd::extract_low(simd::extract_low(d6)),a7=simd::extract_low(simd::extract_low(d7));
+	simd128::transpose32(a0,a1,a2,a3); simd128::transpose32(a4,a5,a6,a7);
+	simd4_float b0=simd::extract_low(simd::extract_high(d0)),b1=simd::extract_low(simd::extract_high(d1)),b2=simd::extract_low(simd::extract_high(d2)),b3=simd::extract_low(simd::extract_high(d3));
+	simd4_float b4=simd::extract_low(simd::extract_high(d4)),b5=simd::extract_low(simd::extract_high(d5)),b6=simd::extract_low(simd::extract_high(d6)),b7=simd::extract_low(simd::extract_high(d7));
+	simd128::transpose32(b0,b1,b2,b3); simd128::transpose32(b4,b5,b6,b7);
+	simd4_float c0=simd::extract_high(simd::extract_low(d0)),c1=simd::extract_high(simd::extract_low(d1)),c2=simd::extract_high(simd::extract_low(d2)),c3=simd::extract_high(simd::extract_low(d3));
+	simd4_float c4=simd::extract_high(simd::extract_low(d4)),c5=simd::extract_high(simd::extract_low(d5)),c6=simd::extract_high(simd::extract_low(d6)),c7=simd::extract_high(simd::extract_low(d7));
+	simd128::transpose32(c0,c1,c2,c3); simd128::transpose32(c4,c5,c6,c7);
+	simd4_float dd0=simd::extract_high(simd::extract_high(d0)),dd1=simd::extract_high(simd::extract_high(d1)),dd2=simd::extract_high(simd::extract_high(d2)),dd3=simd::extract_high(simd::extract_high(d3));
+	simd4_float dd4=simd::extract_high(simd::extract_high(d4)),dd5=simd::extract_high(simd::extract_high(d5)),dd6=simd::extract_high(simd::extract_high(d6)),dd7=simd::extract_high(simd::extract_high(d7));
+	simd128::transpose32(dd0,dd1,dd2,dd3); simd128::transpose32(dd4,dd5,dd6,dd7);
+	simdv_float t0=simd::concat(simd::concat(a0,b0),simd::concat(c0,dd0));
+	simdv_float t1=simd::concat(simd::concat(a1,b1),simd::concat(c1,dd1));
+	simdv_float t2=simd::concat(simd::concat(a2,b2),simd::concat(c2,dd2));
+	simdv_float t3=simd::concat(simd::concat(a3,b3),simd::concat(c3,dd3));
+	simdv_float t4=simd::concat(simd::concat(a4,b4),simd::concat(c4,dd4));
+	simdv_float t5=simd::concat(simd::concat(a5,b5),simd::concat(c5,dd5));
+	simdv_float t6=simd::concat(simd::concat(a6,b6),simd::concat(c6,dd6));
+	simdv_float t7=simd::concat(simd::concat(a7,b7),simd::concat(c7,dd7));
+	unsigned i0 = indices[0*index_stride];
+	unsigned i1 = indices[1*index_stride];
+	unsigned i2 = indices[2*index_stride];
+	unsigned i3 = indices[3*index_stride];
+	simd_float::storeu16(data + i0*stride_in_floats, t0);
+	simd_float::storeu16(data + i1*stride_in_floats, t1);
+	simd_float::storeu16(data + i2*stride_in_floats, t2);
+	simd_float::storeu16(data + i3*stride_in_floats, t3);
+	unsigned i4 = indices[4*index_stride];
+	unsigned i5 = indices[5*index_stride];
+	unsigned i6 = indices[6*index_stride];
+	unsigned i7 = indices[7*index_stride];
+	simd_float::storeu16(data + i4*stride_in_floats, t4);
+	simd_float::storeu16(data + i5*stride_in_floats, t5);
+	simd_float::storeu16(data + i6*stride_in_floats, t6);
+	simd_float::storeu16(data + i7*stride_in_floats, t7);
 #else
 	simd128::transpose32(d0, d1, d2, d3);
 	simd128::transpose32(d4, d5, d6, d7);
@@ -3203,15 +3480,29 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	simdv_float scene_min = simd256::broadcast(scene_min128);
 	simdv_float scene_scale = simd256::broadcast(scene_scale128);
 	simdv_int32 index = simd_int32::make8(0 << 16, 1 << 16, 2 << 16, 3 << 16, 4 << 16, 5 << 16, 6 << 16, 7 << 16);
+#elif NUDGE_SIMDV_WIDTH == 512
+	simdv_float scene_min = simd512::broadcast(scene_min128);
+	simdv_float scene_scale = simd512::broadcast(scene_scale128);
+	simdv_int32 index = simd_int32::make16(0<<16,1<<16,2<<16,3<<16,4<<16,5<<16,6<<16,7<<16,8<<16,9<<16,10<<16,11<<16,12<<16,13<<16,14<<16,15<<16);
 #else
 	simdv_float scene_min = scene_min128;
 	simdv_float scene_scale = scene_scale128;
 	simdv_int32 index = simd_int32::make4(0 << 16, 1 << 16, 2 << 16, 3 << 16);
 #endif
-	
+
+#if NUDGE_SIMDV_WIDTH == 256
+	simdv_float scene_min_x = simd256::broadcast(simd128::shuffle32<0,0,0,0>(scene_min128));
+	simdv_float scene_min_y = simd256::broadcast(simd128::shuffle32<1,1,1,1>(scene_min128));
+	simdv_float scene_min_z = simd256::broadcast(simd128::shuffle32<2,2,2,2>(scene_min128));
+#elif NUDGE_SIMDV_WIDTH == 512
+	simdv_float scene_min_x = simd512::broadcast(simd128::shuffle32<0,0,0,0>(scene_min128));
+	simdv_float scene_min_y = simd512::broadcast(simd128::shuffle32<1,1,1,1>(scene_min128));
+	simdv_float scene_min_z = simd512::broadcast(simd128::shuffle32<2,2,2,2>(scene_min128));
+#else
 	simdv_float scene_min_x = simd128::shuffle32<0,0,0,0>(scene_min);
 	simdv_float scene_min_y = simd128::shuffle32<1,1,1,1>(scene_min);
 	simdv_float scene_min_z = simd128::shuffle32<2,2,2,2>(scene_min);
+#endif
 	
 	uint64_t* morton_codes = allocate_array<uint64_t>(&temporary, aligned_count, 32);
 	
@@ -3226,6 +3517,14 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		simdv_float pos_y = simd::concat(pos_yl, simd_float::load4(&aos_bounds[i+5].min.x));
 		simdv_float pos_z = simd::concat(pos_zl, simd_float::load4(&aos_bounds[i+6].min.x));
 		simdv_float pos_w = simd::concat(pos_wl, simd_float::load4(&aos_bounds[i+7].min.x));
+#elif NUDGE_SIMDV_WIDTH == 512
+		simd4_float px0=simd_float::load4(&aos_bounds[i+0].min.x),px1=simd_float::load4(&aos_bounds[i+4].min.x),px2=simd_float::load4(&aos_bounds[i+8].min.x),px3=simd_float::load4(&aos_bounds[i+12].min.x);
+		simd4_float py0=simd_float::load4(&aos_bounds[i+1].min.x),py1=simd_float::load4(&aos_bounds[i+5].min.x),py2=simd_float::load4(&aos_bounds[i+9].min.x),py3=simd_float::load4(&aos_bounds[i+13].min.x);
+		simd4_float pz0=simd_float::load4(&aos_bounds[i+2].min.x),pz1=simd_float::load4(&aos_bounds[i+6].min.x),pz2=simd_float::load4(&aos_bounds[i+10].min.x),pz3=simd_float::load4(&aos_bounds[i+14].min.x);
+		simd128::transpose32(px0,px1,px2,px3); simd128::transpose32(py0,py1,py2,py3); simd128::transpose32(pz0,pz1,pz2,pz3);
+		simdv_float pos_x=simd::concat(simd::concat(px0,px1),simd::concat(px2,px3));
+		simdv_float pos_y=simd::concat(simd::concat(py0,py1),simd::concat(py2,py3));
+		simdv_float pos_z=simd::concat(simd::concat(pz0,pz1),simd::concat(pz2,pz3));
 #else
 		simd4_float pos_x = simd_float::load4(&aos_bounds[i+0].min.x);
 		simd4_float pos_y = simd_float::load4(&aos_bounds[i+1].min.x);
@@ -3233,23 +3532,42 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		simd4_float pos_w = simd_float::load4(&aos_bounds[i+3].min.x);
 #endif
 		
+#if NUDGE_SIMDV_WIDTH == 256
 		simd128::transpose32(pos_x, pos_y, pos_z, pos_w);
+#endif
 		
 		pos_x = simd_float::msub(pos_x, scene_scale, scene_min_x);
 		pos_y = simd_float::msub(pos_y, scene_scale, scene_min_y);
 		pos_z = simd_float::msub(pos_z, scene_scale, scene_min_z);
 		
+#if NUDGE_SIMDV_WIDTH == 256
 		simdv_int32 lm, hm;
 		morton(simd_float::toint(pos_x), simd_float::toint(pos_y), simd_float::toint(pos_z), lm, hm);
 		hm = simd::bitwise_or(hm, index);
-		
 		simdv_int32 mi0 = simd128::unpacklo32(lm, hm);
 		simdv_int32 mi1 = simd128::unpackhi32(lm, hm);
-		
-#if NUDGE_SIMDV_WIDTH == 256
 		simd_int32::store8((int32_t*)(morton_codes + i) + 0, simd256::permute128<0,2>(mi0, mi1));
 		simd_int32::store8((int32_t*)(morton_codes + i) + 8, simd256::permute128<1,3>(mi0, mi1));
+#elif NUDGE_SIMDV_WIDTH == 512
+		simdv_int32 lm, hm;
+		morton(simd_float::toint(pos_x), simd_float::toint(pos_y), simd_float::toint(pos_z), lm, hm);
+		hm = simd::bitwise_or(hm, index);
+		simd8_int32 lm_lo = simd::extract_low(lm), hm_lo = simd::extract_low(hm);
+		simd8_int32 mi0_lo = simd128::unpacklo32(lm_lo, hm_lo);
+		simd8_int32 mi1_lo = simd128::unpackhi32(lm_lo, hm_lo);
+		simd8_int32 lm_hi = simd::extract_high(lm), hm_hi = simd::extract_high(hm);
+		simd8_int32 mi0_hi = simd128::unpacklo32(lm_hi, hm_hi);
+		simd8_int32 mi1_hi = simd128::unpackhi32(lm_hi, hm_hi);
+		simd_int32::store8((int32_t*)(morton_codes + i) + 0, simd256::permute128<0,2>(mi0_lo, mi1_lo));
+		simd_int32::store8((int32_t*)(morton_codes + i) + 8, simd256::permute128<1,3>(mi0_lo, mi1_lo));
+		simd_int32::store8((int32_t*)(morton_codes + i) + 16, simd256::permute128<0,2>(mi0_hi, mi1_hi));
+		simd_int32::store8((int32_t*)(morton_codes + i) + 24, simd256::permute128<1,3>(mi0_hi, mi1_hi));
 #else
+		simd4_int32 lm, hm;
+		morton(simd_float::toint(pos_x), simd_float::toint(pos_y), simd_float::toint(pos_z), lm, hm);
+		hm = simd::bitwise_or(hm, index);
+		simd4_int32 mi0 = simd128::unpacklo32(lm, hm);
+		simd4_int32 mi1 = simd128::unpackhi32(lm, hm);
 		simd_int32::store4((int32_t*)(morton_codes + i) + 0, mi0);
 		simd_int32::store4((int32_t*)(morton_codes + i) + 4, mi1);
 #endif
@@ -3267,7 +3585,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		sorted_indices[i] = 0;
 	
 	unsigned bounds_count = aligned_count >> simdv_width32_log2;
-	AABBV* bounds = allocate_array<AABBV>(&temporary, bounds_count, 32);
+	AABBV* bounds = allocate_array<AABBV>(&temporary, bounds_count, simdv_alignment);
 	
 	for (unsigned i = 0; i < count; i += simdv_width32) {
 		simdv_float min_x, min_y, min_z, min_w;
@@ -3301,10 +3619,10 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	unsigned aligned_coarse_count = (coarse_count + (simdv_width32-1)) & (~(simdv_width32-1));
 	
 	unsigned coarse_bounds_count = aligned_coarse_count >> simdv_width32_log2;
-	AABBV* coarse_bounds = allocate_array<AABBV>(&temporary, coarse_bounds_count, 32);
+	AABBV* coarse_bounds = allocate_array<AABBV>(&temporary, coarse_bounds_count, simdv_alignment);
 	
 	for (unsigned i = 0; i < coarse_count; ++i) {
-		unsigned start = i << (3 - simdv_width32_log2);
+		unsigned start = i << ((3 > simdv_width32_log2) ? (3 - simdv_width32_log2) : 0);
 		
 		simd4_float coarse_min_x = simd_float::load4(bounds[start].min_x);
 		simd4_float coarse_max_x = simd_float::load4(bounds[start].max_x);
@@ -3506,8 +3824,9 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		if (a_end > count)
 			a_end = count;
 		
-		unsigned b_start = b << (3 - simdv_width32_log2);
-		unsigned b_end = b_start + (1 << (3 - simdv_width32_log2));
+		unsigned shift = (3 > simdv_width32_log2) ? (3 - simdv_width32_log2) : 0;
+		unsigned b_start = b << shift;
+		unsigned b_end = b_start + (1 << shift);
 		
 		if (b_end > bounds_count)
 			b_end = bounds_count;
@@ -4313,8 +4632,8 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 		simdv_int32 invalid_index = simd_int32::makev(~0u);
 		
 		for (unsigned i = 0; i < bucket_count; ++i) {
-			vacant_pair_buckets[i] = allocate_array<ContactPairV>(&temporary, contacts.count+1, 32);
-			vacant_slot_buckets[i] = allocate_array<ContactSlotV>(&temporary, contacts.count, 32);
+			vacant_pair_buckets[i] = allocate_array<ContactPairV>(&temporary, contacts.count+1, simdv_alignment);
+			vacant_slot_buckets[i] = allocate_array<ContactSlotV>(&temporary, contacts.count, simdv_alignment);
 			
 			// Add padding with invalid data so we don't have to range check.
 			simd_int32::storev((int32_t*)vacant_pair_buckets[i]->ab, invalid_index);
@@ -4333,7 +4652,7 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 			unsigned ca = bodies.a ? bodies.a : bodies.b;
 			unsigned cb = bodies.b ? bodies.b : bodies.a;
 			
-#ifdef __AVX2__
+#if NUDGE_SIMDV_WIDTH == 256
 			__m256i a = _mm256_set1_epi16(ca);
 			__m256i b = _mm256_set1_epi16(cb);
 			
@@ -4351,6 +4670,17 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 			}
 			
 			unsigned lane = first_set_bit((unsigned)_mm256_movemask_ps(_mm256_castsi256_ps(_mm256_cmpeq_epi32(scheduled_a_b, invalid_index))));
+#elif NUDGE_SIMDV_WIDTH == 512
+			__m512i a512 = _mm512_set1_epi16(ca);
+			__m512i b512 = _mm512_set1_epi16(cb);
+			unsigned j = 0;
+			for (;; ++j) {
+				__m512i scheduled_a_b = _mm512_load_si512((const __m512i*)vacant_pairs[j].ab);
+				unsigned mask = _mm512_cmpeq_epi16_mask(a512, scheduled_a_b) | _mm512_cmpeq_epi16_mask(b512, scheduled_a_b);
+				if (mask == 0)
+					break;
+			}
+			unsigned lane = first_set_bit(_mm512_cmpeq_epi32_mask(_mm512_load_si512((const __m512i*)vacant_pairs[j].ab), invalid_index));
 #else
 			__m128i a = _mm_set1_epi16(ca);
 			__m128i b = _mm_set1_epi16(cb);
@@ -4376,8 +4706,10 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 			
 			slot->indices[lane] = index;
 			
-#ifdef __AVX2__
+#if NUDGE_SIMDV_WIDTH == 256
 			_mm_store_ss((float*)pair->ab + lane, _mm_castsi128_ps(_mm_unpacklo_epi16(simd::extract_low(a), simd::extract_low(b))));
+#elif NUDGE_SIMDV_WIDTH == 512
+			_mm_store_ss((float*)pair->ab + lane, _mm_castsi128_ps(_mm_unpacklo_epi16(_mm512_castsi512_si128(a512), _mm512_castsi512_si128(b512))));
 #else
 			_mm_store_ss((float*)pair->ab + lane, _mm_castsi128_ps(_mm_unpacklo_epi16(a, b)));
 #endif
@@ -4419,10 +4751,14 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 				simdv_int32 indices = simd_int32::loadv((const int32_t*)vacant_slots[i].indices);
 				
 				simdv_int32 mask = simd_int32::cmp_eq(ab, invalid_index);
+#if NUDGE_SIMDV_WIDTH >= 256
+				simdv_int32 first_index = simd_int32::makev(simd_int32::extract_first_int32(indices));
+#else
 				simdv_int32 first_index = simd128::shuffle32<0, 0, 0, 0>(indices);
 				
 #if NUDGE_SIMDV_WIDTH == 256
 				first_index = simd256::shuffle128<0,0>(first_index);
+#endif
 #endif
 				
 				indices = simd::blendv32(indices, first_index, mask);
@@ -4433,8 +4769,8 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 	}
 	commit_array<ContactSlotV>(memory, contact_slot_count);
 	
-	ContactConstraintV* constraints = allocate_array<ContactConstraintV>(memory, contact_slot_count, 32);
-	ContactConstraintStateV* constraint_states = allocate_array<ContactConstraintStateV>(memory, contact_slot_count, 32);
+	ContactConstraintV* constraints = allocate_array<ContactConstraintV>(memory, contact_slot_count, simdv_alignment);
+	ContactConstraintStateV* constraint_states = allocate_array<ContactConstraintStateV>(memory, contact_slot_count, simdv_alignment);
 	
 	data->constraints = constraints;
 	data->constraint_states = constraint_states;
@@ -4472,6 +4808,15 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 													 bodies.momentum[a4].unused0, bodies.momentum[a5].unused0, bodies.momentum[a6].unused0, bodies.momentum[a7].unused0);
 		simdv_float b_mass_inverse = simd_float::make8(bodies.momentum[b0].unused0, bodies.momentum[b1].unused0, bodies.momentum[b2].unused0, bodies.momentum[b3].unused0,
 													 bodies.momentum[b4].unused0, bodies.momentum[b5].unused0, bodies.momentum[b6].unused0, bodies.momentum[b7].unused0);
+#elif NUDGE_SIMDV_WIDTH == 512
+		unsigned a4 = ab_array[8]; unsigned a5 = ab_array[10]; unsigned a6 = ab_array[12]; unsigned a7 = ab_array[14];
+		unsigned a8 = ab_array[16]; unsigned a9 = ab_array[18]; unsigned a10 = ab_array[20]; unsigned a11 = ab_array[22];
+		unsigned a12 = ab_array[24]; unsigned a13 = ab_array[26]; unsigned a14 = ab_array[28]; unsigned a15 = ab_array[30];
+		unsigned b4 = ab_array[9]; unsigned b5 = ab_array[11]; unsigned b6 = ab_array[13]; unsigned b7 = ab_array[15];
+		unsigned b8 = ab_array[17]; unsigned b9 = ab_array[19]; unsigned b10 = ab_array[21]; unsigned b11 = ab_array[23];
+		unsigned b12 = ab_array[25]; unsigned b13 = ab_array[27]; unsigned b14 = ab_array[29]; unsigned b15 = ab_array[31];
+		simdv_float a_mass_inverse = simd_float::make16(bodies.momentum[a0].unused0,bodies.momentum[a1].unused0,bodies.momentum[a2].unused0,bodies.momentum[a3].unused0,bodies.momentum[a4].unused0,bodies.momentum[a5].unused0,bodies.momentum[a6].unused0,bodies.momentum[a7].unused0,bodies.momentum[a8].unused0,bodies.momentum[a9].unused0,bodies.momentum[a10].unused0,bodies.momentum[a11].unused0,bodies.momentum[a12].unused0,bodies.momentum[a13].unused0,bodies.momentum[a14].unused0,bodies.momentum[a15].unused0);
+		simdv_float b_mass_inverse = simd_float::make16(bodies.momentum[b0].unused0,bodies.momentum[b1].unused0,bodies.momentum[b2].unused0,bodies.momentum[b3].unused0,bodies.momentum[b4].unused0,bodies.momentum[b5].unused0,bodies.momentum[b6].unused0,bodies.momentum[b7].unused0,bodies.momentum[b8].unused0,bodies.momentum[b9].unused0,bodies.momentum[b10].unused0,bodies.momentum[b11].unused0,bodies.momentum[b12].unused0,bodies.momentum[b13].unused0,bodies.momentum[b14].unused0,bodies.momentum[b15].unused0);
 #else
 		simdv_float a_mass_inverse = simd_float::make4(bodies.momentum[a0].unused0, bodies.momentum[a1].unused0, bodies.momentum[a2].unused0, bodies.momentum[a3].unused0);
 		simdv_float b_mass_inverse = simd_float::make4(bodies.momentum[b0].unused0, bodies.momentum[b1].unused0, bodies.momentum[b2].unused0, bodies.momentum[b3].unused0);
