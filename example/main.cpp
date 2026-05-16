@@ -209,18 +209,6 @@ static void key_up(unsigned char key, int, int) {
     }
 }
 
-static void special_key_down(int key, int, int) {
-    switch (key) {
-        case GLUT_KEY_SHIFT_L: case GLUT_KEY_SHIFT_R: key_shift = true; break;
-    }
-}
-
-static void special_key_up(int key, int, int) {
-    switch (key) {
-        case GLUT_KEY_SHIFT_L: case GLUT_KEY_SHIFT_R: key_shift = false; break;
-    }
-}
-
 static void mouse_motion(int x, int y) {
     if (!mouse_locked) return;
 
@@ -589,8 +577,6 @@ int main(int argc, const char* argv[]) {
 	glutDisplayFunc(render);
 	glutKeyboardFunc(key_down);
 	glutKeyboardUpFunc(key_up);
-	glutSpecialFunc(special_key_down);
-	glutSpecialUpFunc(special_key_up);
 	glutMotionFunc(mouse_motion);
 	glutMouseFunc(mouse_button);
 
