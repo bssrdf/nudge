@@ -3518,13 +3518,17 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		simdv_float pos_z = simd::concat(pos_zl, simd_float::load4(&aos_bounds[i+6].min.x));
 		simdv_float pos_w = simd::concat(pos_wl, simd_float::load4(&aos_bounds[i+7].min.x));
 #elif NUDGE_SIMDV_WIDTH == 512
-		simd4_float px0=simd_float::load4(&aos_bounds[i+0].min.x),px1=simd_float::load4(&aos_bounds[i+4].min.x),px2=simd_float::load4(&aos_bounds[i+8].min.x),px3=simd_float::load4(&aos_bounds[i+12].min.x);
-		simd4_float py0=simd_float::load4(&aos_bounds[i+1].min.x),py1=simd_float::load4(&aos_bounds[i+5].min.x),py2=simd_float::load4(&aos_bounds[i+9].min.x),py3=simd_float::load4(&aos_bounds[i+13].min.x);
-		simd4_float pz0=simd_float::load4(&aos_bounds[i+2].min.x),pz1=simd_float::load4(&aos_bounds[i+6].min.x),pz2=simd_float::load4(&aos_bounds[i+10].min.x),pz3=simd_float::load4(&aos_bounds[i+14].min.x);
-		simd128::transpose32(px0,px1,px2,px3); simd128::transpose32(py0,py1,py2,py3); simd128::transpose32(pz0,pz1,pz2,pz3);
-		simdv_float pos_x=simd::concat(simd::concat(px0,px1),simd::concat(px2,px3));
-		simdv_float pos_y=simd::concat(simd::concat(py0,py1),simd::concat(py2,py3));
-		simdv_float pos_z=simd::concat(simd::concat(pz0,pz1),simd::concat(pz2,pz3));
+		simd4_float px0=simd_float::load4(&aos_bounds[i+ 0].min.x),px1=simd_float::load4(&aos_bounds[i+ 1].min.x),px2=simd_float::load4(&aos_bounds[i+ 2].min.x),px3=simd_float::load4(&aos_bounds[i+ 3].min.x);
+		simd128::transpose32(px0,px1,px2,px3);
+		simd4_float px4=simd_float::load4(&aos_bounds[i+ 4].min.x),px5=simd_float::load4(&aos_bounds[i+ 5].min.x),px6=simd_float::load4(&aos_bounds[i+ 6].min.x),px7=simd_float::load4(&aos_bounds[i+ 7].min.x);
+		simd128::transpose32(px4,px5,px6,px7);
+		simd4_float px8=simd_float::load4(&aos_bounds[i+ 8].min.x),px9=simd_float::load4(&aos_bounds[i+ 9].min.x),pxa=simd_float::load4(&aos_bounds[i+10].min.x),pxb=simd_float::load4(&aos_bounds[i+11].min.x);
+		simd128::transpose32(px8,px9,pxa,pxb);
+		simd4_float pxc=simd_float::load4(&aos_bounds[i+12].min.x),pxd=simd_float::load4(&aos_bounds[i+13].min.x),pxe=simd_float::load4(&aos_bounds[i+14].min.x),pxf=simd_float::load4(&aos_bounds[i+15].min.x);
+		simd128::transpose32(pxc,pxd,pxe,pxf);
+		simdv_float pos_x=simd::concat(simd::concat(px0,px4),simd::concat(px8,pxc));
+		simdv_float pos_y=simd::concat(simd::concat(px1,px5),simd::concat(px9,pxd));
+		simdv_float pos_z=simd::concat(simd::concat(px2,px6),simd::concat(pxa,pxe));
 #else
 		simd4_float pos_x = simd_float::load4(&aos_bounds[i+0].min.x);
 		simd4_float pos_y = simd_float::load4(&aos_bounds[i+1].min.x);
