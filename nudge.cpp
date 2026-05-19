@@ -824,6 +824,52 @@ namespace simd512 {
 	NUDGE_FORCEINLINE simd16_int32 broadcast(simd4_int32 x) { return _mm512_broadcast_i32x4(_mm_loadu_si128(reinterpret_cast<const __m128i*>(&x))); }
 	template<unsigned i0, unsigned i1> NUDGE_FORCEINLINE simd16_float shuffle128(simd16_float x) { return _mm512_shuffle_f32x4(x, x, _MM_SHUFFLE(i1, i1, i0, i0)); }
 	template<unsigned i0, unsigned i1> NUDGE_FORCEINLINE simd16_int32 shuffle128(simd16_int32 x) { return _mm512_shuffle_i32x4(x, x, _MM_SHUFFLE(i1, i1, i0, i0)); }
+
+	// template<unsigned i0, unsigned i1>
+	// NUDGE_FORCEINLINE simd8_float permute128(simd8_float x, simd8_float y) {
+	// 	return _mm256_castsi256_ps(_mm256_permute2x128_si256(_mm256_castps_si256(x), _mm256_castps_si256(y), i0 | (i1 << 4)));
+	// }
+
+	 // Extract low or high 128-bit lane from a 256-bit vector
+	template<bool High>
+	NUDGE_FORCEINLINE __m128 extract_lane(__m256 v) {
+		if constexpr (High) {
+			return _mm256_extractf128_ps(v, 1);   // high 128-bit lane
+		} else {
+			return _mm256_castps256_ps128(v);     // low 128-bit lane
+		}
+	}
+
+	template<unsigned i0, unsigned i1, unsigned i2, unsigned i3>
+    NUDGE_FORCEINLINE __m512 permute128(
+       __m256 v0, __m256 v1, __m256 v2, __m256 v3){
+       // Build result lane-by-lane: v0 → slot 0, v1 → slot 1, v2 → slot 2, v3 → slot 3
+       // Build result lane-by-lane, casting ps → si for inserti32x4, then back
+       __m512i result = _mm512_castps128_ps512(
+           extract_lane_ps<(i0 & 1) != 0>(v0)
+       );
+       result = _mm512_inserti32x4(result,
+           _mm_castps_si128(extract_lane_ps<(i1 & 1) != 0>(v1)), 1);
+       result = _mm512_inserti32x4(result,
+           _mm_castps_si128(extract_lane_ps<(i2 & 1) != 0>(v2)), 2);
+       result = _mm512_inserti32x4(result,
+           _mm_castps_si128(extract_lane_ps<(i3 & 1) != 0>(v3)), 3);
+       return _mm512_castsi512_ps(result);
+    }
+
+	NUDGE_FORCEINLINE void transpose32(simd16_float& x, simd16_float& y, simd16_float& z, simd16_float& w) {
+		 // Step 1: Interleave x/y and z/w within each 128-bit lane
+		__m512 tmp0 = _mm512_unpacklo_ps(x, y); // [x0 y0 x1 y1 | x4 y4 x5 y5 | ...]
+		__m512 tmp1 = _mm512_unpackhi_ps(x, y); // [x2 y2 x3 y3 | x6 y6 x7 y7 | ...]
+		__m512 tmp2 = _mm512_unpacklo_ps(z, w); // [z0 w0 z1 w1 | z4 w4 z5 w5 | ...]
+		__m512 tmp3 = _mm512_unpackhi_ps(z, w); // [z2 w2 z3 w3 | z6 w6 z7 w7 | ...]
+
+		// Step 2: Shuffle to form complete rows
+		x = _mm512_shuffle_ps(tmp0, tmp2, 0x44); // [x0 y0 z0 w0 | x4 y4 z4 w4 | ...]
+		y = _mm512_shuffle_ps(tmp0, tmp2, 0xEE); // [x1 y1 z1 w1 | x5 y5 z5 w5 | ...]
+		z = _mm512_shuffle_ps(tmp1, tmp3, 0x44); // [x2 y2 z2 w2 | x6 y6 z6 w6 | ...]
+		w = _mm512_shuffle_ps(tmp1, tmp3, 0xEE); // [x3 y3 z3 w3 | x7 y7 z7 w7 | ...]
+	}
 }
 
 namespace simd {
@@ -3220,35 +3266,6 @@ NUDGE_FORCEINLINE static void load8(const float* data, const T* indices,
 	d5 = simd256::permute128<1,3>(t1, t5);
 	d6 = simd256::permute128<1,3>(t2, t6);
 	d7 = simd256::permute128<1,3>(t3, t7);
-#elif NUDGE_SIMDV_WIDTH == 512
-	simdv_float t0 = simd_float::loadu16(data + indices[0*index_stride]*stride_in_floats);
-	simdv_float t1 = simd_float::loadu16(data + indices[1*index_stride]*stride_in_floats);
-	simdv_float t2 = simd_float::loadu16(data + indices[2*index_stride]*stride_in_floats);
-	simdv_float t3 = simd_float::loadu16(data + indices[3*index_stride]*stride_in_floats);
-	simdv_float t4 = simd_float::loadu16(data + indices[4*index_stride]*stride_in_floats);
-	simdv_float t5 = simd_float::loadu16(data + indices[5*index_stride]*stride_in_floats);
-	simdv_float t6 = simd_float::loadu16(data + indices[6*index_stride]*stride_in_floats);
-	simdv_float t7 = simd_float::loadu16(data + indices[7*index_stride]*stride_in_floats);
-	simd4_float a0=simd::extract_low(simd::extract_low(t0)),a1=simd::extract_low(simd::extract_low(t1)),a2=simd::extract_low(simd::extract_low(t2)),a3=simd::extract_low(simd::extract_low(t3));
-	simd4_float a4=simd::extract_low(simd::extract_low(t4)),a5=simd::extract_low(simd::extract_low(t5)),a6=simd::extract_low(simd::extract_low(t6)),a7=simd::extract_low(simd::extract_low(t7));
-	simd128::transpose32(a0,a1,a2,a3); simd128::transpose32(a4,a5,a6,a7);
-	simd4_float b0=simd::extract_low(simd::extract_high(t0)),b1=simd::extract_low(simd::extract_high(t1)),b2=simd::extract_low(simd::extract_high(t2)),b3=simd::extract_low(simd::extract_high(t3));
-	simd4_float b4=simd::extract_low(simd::extract_high(t4)),b5=simd::extract_low(simd::extract_high(t5)),b6=simd::extract_low(simd::extract_high(t6)),b7=simd::extract_low(simd::extract_high(t7));
-	simd128::transpose32(b0,b1,b2,b3); simd128::transpose32(b4,b5,b6,b7);
-	simd4_float c0=simd::extract_high(simd::extract_low(t0)),c1=simd::extract_high(simd::extract_low(t1)),c2=simd::extract_high(simd::extract_low(t2)),c3=simd::extract_high(simd::extract_low(t3));
-	simd4_float c4=simd::extract_high(simd::extract_low(t4)),c5=simd::extract_high(simd::extract_low(t5)),c6=simd::extract_high(simd::extract_low(t6)),c7=simd::extract_high(simd::extract_low(t7));
-	simd128::transpose32(c0,c1,c2,c3); simd128::transpose32(c4,c5,c6,c7);
-	simd4_float dd0=simd::extract_high(simd::extract_high(t0)),dd1=simd::extract_high(simd::extract_high(t1)),dd2=simd::extract_high(simd::extract_high(t2)),dd3=simd::extract_high(simd::extract_high(t3));
-	simd4_float dd4=simd::extract_high(simd::extract_high(t4)),dd5=simd::extract_high(simd::extract_high(t5)),dd6=simd::extract_high(simd::extract_high(t6)),dd7=simd::extract_high(simd::extract_high(t7));
-	simd128::transpose32(dd0,dd1,dd2,dd3); simd128::transpose32(dd4,dd5,dd6,dd7);
-	d0=simd::concat(simd::concat(a0,b0),simd::concat(c0,dd0));
-	d1=simd::concat(simd::concat(a1,b1),simd::concat(c1,dd1));
-	d2=simd::concat(simd::concat(a2,b2),simd::concat(c2,dd2));
-	d3=simd::concat(simd::concat(a3,b3),simd::concat(c3,dd3));
-	d4=simd::concat(simd::concat(a4,b4),simd::concat(c4,dd4));
-	d5=simd::concat(simd::concat(a5,b5),simd::concat(c5,dd5));
-	d6=simd::concat(simd::concat(a6,b6),simd::concat(c6,dd6));
-	d7=simd::concat(simd::concat(a7,b7),simd::concat(c7,dd7));
 #else
 	unsigned i0 = indices[0*index_stride];
 	unsigned i1 = indices[1*index_stride];
@@ -3266,9 +3283,49 @@ NUDGE_FORCEINLINE static void load8(const float* data, const T* indices,
 	d7 = simd_float::load4(data + i3*stride_in_floats + 4);
 #endif
 	
-#if NUDGE_SIMDV_WIDTH < 512
 	simd128::transpose32(d0, d1, d2, d3);
 	simd128::transpose32(d4, d5, d6, d7);
+}
+
+
+template<unsigned data_stride, unsigned index_stride = 1, class T>
+NUDGE_FORCEINLINE static void load16(const float* data, const T* indices,
+									simdv_float& d0, simdv_float& d1, simdv_float& d2, simdv_float& d3,
+									simdv_float& d4, simdv_float& d5, simdv_float& d6, simdv_float& d7) {
+	static const unsigned stride_in_floats = data_stride/sizeof(float);
+
+#if NUDGE_SIMDV_WIDTH == 512
+	// Load 16 objects individually (8 floats each = 1 AABB in AoS order).
+	// Each AABB: {min.x, min.y, min.z, unused0, max.x, max.y, max.z, unused1}
+	simd8_float t0  = simd_float::load8(data + indices[0*index_stride]*stride_in_floats);
+	simd8_float t1  = simd_float::load8(data + indices[1*index_stride]*stride_in_floats);
+	simd8_float t2  = simd_float::load8(data + indices[2*index_stride]*stride_in_floats);
+	simd8_float t3  = simd_float::load8(data + indices[3*index_stride]*stride_in_floats);
+	simd8_float t4  = simd_float::load8(data + indices[4*index_stride]*stride_in_floats);
+	simd8_float t5  = simd_float::load8(data + indices[5*index_stride]*stride_in_floats);
+	simd8_float t6  = simd_float::load8(data + indices[6*index_stride]*stride_in_floats);
+	simd8_float t7  = simd_float::load8(data + indices[7*index_stride]*stride_in_floats);
+	simd8_float t8  = simd_float::load8(data + indices[8*index_stride]*stride_in_floats);
+	simd8_float t9  = simd_float::load8(data + indices[9*index_stride]*stride_in_floats);
+	simd8_float t10 = simd_float::load8(data + indices[10*index_stride]*stride_in_floats);
+	simd8_float t11 = simd_float::load8(data + indices[11*index_stride]*stride_in_floats);
+	simd8_float t12 = simd_float::load8(data + indices[12*index_stride]*stride_in_floats);
+	simd8_float t13 = simd_float::load8(data + indices[13*index_stride]*stride_in_floats);
+	simd8_float t14 = simd_float::load8(data + indices[14*index_stride]*stride_in_floats);
+	simd8_float t15 = simd_float::load8(data + indices[15*index_stride]*stride_in_floats);
+
+	d0 = simd512::permute128<0,0,0,0>(t0, t4, t8,  t12);
+	d1 = simd512::permute128<0,0,0,0>(t1, t5, t9,  t13);
+	d2 = simd512::permute128<0,0,0,0>(t2, t6, t10, t14);
+	d3 = simd512::permute128<0,0,0,0>(t3, t7, t11, t15);
+
+	d4 = simd512::permute128<1,1,1,1>(t0, t4, t8,  t12);
+	d5 = simd512::permute128<1,1,1,1>(t1, t5, t9,  t13);
+	d6 = simd512::permute128<1,1,1,1>(t2, t6, t10, t14);
+	d7 = simd512::permute128<1,1,1,1>(t3, t7, t11, t15);
+
+	simd512::transpose32(d0, d1, d2, d3);
+	simd512::transpose32(d4, d5, d6, d7);
 #endif
 }
 
@@ -3594,10 +3651,15 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	for (unsigned i = 0; i < count; i += simdv_width32) {
 		simdv_float min_x, min_y, min_z, min_w;
 		simdv_float max_x, max_y, max_z, max_w;
+#if NUDGE_SIMDV_WIDTH == 512
+        load16<sizeof(aos_bounds[0])>(&aos_bounds[0].min.x, sorted_indices + i,
+									min_x, min_y, min_z, min_w,
+									max_x, max_y, max_z, max_w);
+#else
 		load8<sizeof(aos_bounds[0])>(&aos_bounds[0].min.x, sorted_indices + i,
 									min_x, min_y, min_z, min_w,
 									max_x, max_y, max_z, max_w);
-		
+#endif
 		simd_float::storev(bounds[i >> simdv_width32_log2].min_x, min_x);
 		simd_float::storev(bounds[i >> simdv_width32_log2].max_x, max_x);
 		simd_float::storev(bounds[i >> simdv_width32_log2].min_y, min_y);
@@ -3761,8 +3823,84 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	// Test AABBs within the coarse pairs.
 	uint32_t* groups = reserve_array<uint32_t>(&temporary, coarse_pair_count*16, 32);
 	unsigned group_count = 0;
+	printf("Coarse pairs count: %u\n", coarse_pair_count);
 	
-#if NUDGE_SIMDV_WIDTH == 256
+#if NUDGE_SIMDV_WIDTH == 512
+	// Each coarse cell has 8 sub-colliders. bounds[g] holds 16 colliders (= 2 coarse cells).
+	// Even coarse cell c -> bounds[c/2] lanes 0-7, odd coarse cell c -> bounds[(c-1)/2] lanes 8-15.
+	// Load 8 colliders into lower 8 lanes, pad upper 8 lanes with sentinel values that never collide.
+	for (unsigned n = 0; n < coarse_pair_count; ++n) {
+		unsigned pair = coarse_pairs[n];
+		
+		unsigned a = pair >> 16;
+		unsigned b = pair & 0xffff;
+		
+		unsigned lane_count = 8;
+		
+		if (a == b)
+			--lane_count;
+		
+		if (lane_count + (a << 3) > count)
+			lane_count = count - (a << 3);
+		
+		unsigned ij_bits = (b << 8) | (a << 22);
+		unsigned lower_lane_mask = a == b ? 0xfe00 : 0xffff;
+		
+		// Load b-colliders into lower 8 lanes, pad upper 8 lanes with sentinels.
+		unsigned b_group = b >> 1;
+		const float* b_min_x_ptr = bounds[b_group].min_x + ((b & 1) << 3);
+		const float* b_max_x_ptr = bounds[b_group].max_x + ((b & 1) << 3);
+		const float* b_min_y_ptr = bounds[b_group].min_y + ((b & 1) << 3);
+		const float* b_max_y_ptr = bounds[b_group].max_y + ((b & 1) << 3);
+		const float* b_min_z_ptr = bounds[b_group].min_z + ((b & 1) << 3);
+		const float* b_max_z_ptr = bounds[b_group].max_z + ((b & 1) << 3);
+		
+		simd8_float b_min_x_lo = simd_float::load8(b_min_x_ptr);
+		simd8_float b_max_x_lo = simd_float::load8(b_max_x_ptr);
+		simd8_float b_min_y_lo = simd_float::load8(b_min_y_ptr);
+		simd8_float b_max_y_lo = simd_float::load8(b_max_y_ptr);
+		simd8_float b_min_z_lo = simd_float::load8(b_min_z_ptr);
+		simd8_float b_max_z_lo = simd_float::load8(b_max_z_ptr);
+		
+		simd8_float inf8 = simd_float::make8(INFINITY);
+		simd8_float ninf8 = simd_float::make8(-INFINITY);
+		
+		simdv_float min_b_x = simd::concat(b_min_x_lo, inf8);
+		simdv_float max_b_x = simd::concat(b_max_x_lo, ninf8);
+		simdv_float min_b_y = simd::concat(b_min_y_lo, inf8);
+		simdv_float max_b_y = simd::concat(b_max_y_lo, ninf8);
+		simdv_float min_b_z = simd::concat(b_min_z_lo, inf8);
+		simdv_float max_b_z = simd::concat(b_max_z_lo, ninf8);
+		
+		unsigned a_group = a >> 1;
+		unsigned a_start_lane = (a & 1) << 3;
+		
+		for (unsigned i = 0; i < lane_count; ++i, ij_bits += (1 << 19)) {
+			unsigned lane = a_start_lane + i;
+			
+			simdv_float min_a_x = simd_float::broadcast_loadv(bounds[a_group].min_x + lane);
+			simdv_float max_a_x = simd_float::broadcast_loadv(bounds[a_group].max_x + lane);
+			simdv_float min_a_y = simd_float::broadcast_loadv(bounds[a_group].min_y + lane);
+			simdv_float max_a_y = simd_float::broadcast_loadv(bounds[a_group].max_y + lane);
+			simdv_float min_a_z = simd_float::broadcast_loadv(bounds[a_group].min_z + lane);
+			simdv_float max_a_z = simd_float::broadcast_loadv(bounds[a_group].max_z + lane);
+			
+			simdv_float inside_x = simd::bitwise_and(simd_float::cmp_gt(max_b_x, min_a_x), simd_float::cmp_gt(max_a_x, min_b_x));
+			simdv_float inside_y = simd::bitwise_and(simd_float::cmp_gt(max_b_y, min_a_y), simd_float::cmp_gt(max_a_y, min_b_y));
+			simdv_float inside_z = simd::bitwise_and(simd_float::cmp_gt(max_b_z, min_a_z), simd_float::cmp_gt(max_a_z, min_b_z));
+			
+			// Extract only the lower 8 bits (upper 8 lanes are sentinels and never match).
+			unsigned mask = simd::signmask32(simd::bitwise_and(simd::bitwise_and(inside_x, inside_y), inside_z)) & 0xff;
+			
+			// Mask out collisions already handled.
+			mask &= lower_lane_mask >> 8;
+			lower_lane_mask <<= 1;
+			
+			groups[group_count] = mask | ij_bits;
+			group_count += mask != 0;
+		}
+	}
+#elif NUDGE_SIMDV_WIDTH == 256
 	for (unsigned n = 0; n < coarse_pair_count; ++n) {
 		unsigned pair = coarse_pairs[n];
 		
@@ -3814,7 +3952,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 			group_count += mask != 0;
 		}
 	}
-#else
+#elif NUDGE_SIMDV_WIDTH == 128
 	// TODO: This version is currently much worse than the 256-bit version. We should fix it.
 	for (unsigned n = 0; n < coarse_pair_count; ++n) {
 		unsigned pair = coarse_pairs[n];
@@ -3905,6 +4043,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 			pairs[pair_count++] = base + index;
 		}
 	}
+	printf("Coarse pairs: %u, %u\n", pair_count, group_count);
 	
 	commit_array<uint32_t>(&temporary, pair_count);
 	
@@ -4146,6 +4285,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	uint32_t written_per_bucket[4] = { bucket_offsets[0], bucket_offsets[1], bucket_offsets[2], bucket_offsets[3] };
 	
 	uint32_t* partitioned_pairs = allocate_array<uint32_t>(&temporary, pair_count + 7, 16); // Padding is required.
+	// printf("paird_count: %u\n", pair_count);
 	
 	for (unsigned i = 0; i < pair_count; ++i) {
 		unsigned pair = pairs[i];
