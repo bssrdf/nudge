@@ -95,7 +95,22 @@ inline __m128& operator *= (__m128& a, __m128 b) {
 inline __m128& operator /= (__m128& a, __m128 b) {
 	return a = _mm_div_ps(a, b);
 }
+
+
 #ifdef __AVX2__
+
+void print_m256(__m256 v)
+{
+    alignas(32) float f[8];
+    _mm256_store_ps(f, v);
+
+    printf("[ ");
+    for (int i = 0; i < 8; i++) {
+        printf("%f ", f[i]);
+    }
+    printf("]\n");
+}
+
 inline __m256 operator - (__m256 a) {
 	return _mm256_xor_ps(a, _mm256_set1_ps(-0.0f));
 }
