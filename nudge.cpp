@@ -832,7 +832,7 @@ namespace simd512 {
 
 	 // Extract low or high 128-bit lane from a 256-bit vector
 	template<bool High>
-	NUDGE_FORCEINLINE __m128 extract_lane(__m256 v) {
+	NUDGE_FORCEINLINE __m128 extract_lane_ps(__m256 v) {
 		if constexpr (High) {
 			return _mm256_extractf128_ps(v, 1);   // high 128-bit lane
 		} else {
@@ -845,8 +845,9 @@ namespace simd512 {
        __m256 v0, __m256 v1, __m256 v2, __m256 v3){
        // Build result lane-by-lane: v0 → slot 0, v1 → slot 1, v2 → slot 2, v3 → slot 3
        // Build result lane-by-lane, casting ps → si for inserti32x4, then back
-       __m512i result = _mm512_castps128_ps512(
-           extract_lane_ps<(i0 & 1) != 0>(v0)
+       __m512i result = _mm512_castps_si512(
+		  _mm512_castps128_ps512(
+           extract_lane_ps<(i0 & 1) != 0>(v0))
        );
        result = _mm512_inserti32x4(result,
            _mm_castps_si128(extract_lane_ps<(i1 & 1) != 0>(v1)), 1);
@@ -3266,7 +3267,7 @@ NUDGE_FORCEINLINE static void load8(const float* data, const T* indices,
 	d5 = simd256::permute128<1,3>(t1, t5);
 	d6 = simd256::permute128<1,3>(t2, t6);
 	d7 = simd256::permute128<1,3>(t3, t7);
-#else
+#elif NUDGE_SIMDV_WIDTH == 256
 	unsigned i0 = indices[0*index_stride];
 	unsigned i1 = indices[1*index_stride];
 	unsigned i2 = indices[2*index_stride];
@@ -3282,9 +3283,10 @@ NUDGE_FORCEINLINE static void load8(const float* data, const T* indices,
 	d6 = simd_float::load4(data + i2*stride_in_floats + 4);
 	d7 = simd_float::load4(data + i3*stride_in_floats + 4);
 #endif
-	
+#if NUDGE_SIMDV_WIDTH < 512
 	simd128::transpose32(d0, d1, d2, d3);
 	simd128::transpose32(d4, d5, d6, d7);
+#endif
 }
 
 
