@@ -3317,6 +3317,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	
 	unsigned coarse_bounds_count = aligned_coarse_count >> simdv_width32_log2;
 	AABBV* coarse_bounds = allocate_array<AABBV>(&temporary, coarse_bounds_count, 32);
+	printf("AA %u, %u, %u, %u, %u \n", aligned_count, coarse_count, aligned_coarse_count, coarse_bounds_count, bounds_count);
 	
 	for (unsigned i = 0; i < coarse_count; ++i) {
 		unsigned start = i << (3 - simdv_width32_log2);
@@ -3454,6 +3455,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	// Test AABBs within the coarse pairs.
 	uint32_t* groups = reserve_array<uint32_t>(&temporary, coarse_pair_count*16, 32);
 	unsigned group_count = 0;
+	printf("Coarse group count: %u Coarse pairs count: %u\n", coarse_group_count, coarse_pair_count);
 	
 #if NUDGE_SIMDV_WIDTH == 256
 	for (unsigned n = 0; n < coarse_pair_count; ++n) {
