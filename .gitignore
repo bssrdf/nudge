@@ -17,6 +17,7 @@ build/
 cmake-build-*/
 out/
 example/win/x64/
+example/win/*.txt
 example/win/example
 
 # IDE files

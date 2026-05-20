@@ -807,6 +807,18 @@ namespace simd_int32 {
 typedef __m512 simd16_float;
 typedef __m512i simd16_int32;
 
+void print_m512(__m512 v)
+{
+    alignas(64) float f[16];
+    _mm512_store_ps(f, v);
+
+    printf("[ ");
+    for (int i = 0; i < 16; i++) {
+        printf("%.2f ", f[i]);
+    }
+    printf("]\n");
+}
+
 inline __m512 operator - (__m512 a) { return _mm512_sub_ps(_mm512_setzero_ps(), a); }
 inline __m512 operator + (__m512 a, __m512 b) { return _mm512_add_ps(a, b); }
 inline __m512 operator - (__m512 a, __m512 b) { return _mm512_sub_ps(a, b); }
@@ -912,7 +924,17 @@ namespace simd_float {
 	NUDGE_FORCEINLINE simd16_float rsqrt(simd16_float x) { return _mm512_rsqrt14_ps(x); }
 	NUDGE_FORCEINLINE simd16_float sqrt(simd16_float x) { return _mm512_sqrt_ps(x); }
 	NUDGE_FORCEINLINE simd16_float recpeq(simd16_float x) { return _mm512_rcp14_ps(x); }
-	NUDGE_FORCEINLINE simd16_float cmp_gt(simd16_float x, simd16_float y) { return _mm512_mask_blend_ps(_mm512_cmplt_ps_mask(y, x), y, x); }
+	NUDGE_FORCEINLINE simd16_float cmp_gt(simd16_float x, simd16_float y) {
+		// 	return	_mm512_movm_ps(
+		// 	// _mm512_cmpgt_ps_mask(x, y)
+		// 	_mm512_cmp_ps_mask(x, y, _CMP_GT_OQ)
+		// );
+		return _mm512_castsi512_ps(
+        _mm512_maskz_set1_epi32(_mm512_cmp_ps_mask(x, y, _CMP_GT_OQ), -1)
+    );
+		// return _mm512_mask_blend_ps(_mm512_cmplt_ps_mask(y, x), y, x);
+	}
+
 	NUDGE_FORCEINLINE simd16_float cmp_lt(simd16_float x, simd16_float y) { return _mm512_mask_blend_ps(_mm512_cmplt_ps_mask(x, y), y, x); }
 	NUDGE_FORCEINLINE simd16_float cmp_eq(simd16_float x, simd16_float y) { return _mm512_mask_blend_ps(_mm512_cmpeq_ps_mask(x, y), y, x); }
 	NUDGE_FORCEINLINE simd16_float cmp_neq(simd16_float x, simd16_float y) { return _mm512_mask_blend_ps(~_mm512_cmpeq_ps_mask(x, y), y, x); }
@@ -3681,14 +3703,28 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		bounds[bounds_group].min_z[bounds_lane] = NAN;
 		bounds[bounds_group].max_z[bounds_lane] = NAN;
 	}
+
+	// printf("minx: [");
+    // for(int i = 0; i < simdv_width32; ++i)
+	//    printf("%f, ", bounds[0].min_x[i]);
+	// printf("]\n");
+	// printf("maxx: [");
+    // for(int i = 0; i < simdv_width32; ++i)
+	//    printf("%f, ", bounds[0].max_x[i]);
+	// printf("]\n");
 	
 	// Pack each set of 8 consecutive AABBs into coarse AABBs.
+#if NUDGE_SIMDV_WIDTH <= 256
 	unsigned coarse_count = aligned_count >> 3;
+#else
+	unsigned coarse_count = aligned_count >> simdv_width32_log2;
+#endif
 	unsigned aligned_coarse_count = (coarse_count + (simdv_width32-1)) & (~(simdv_width32-1));
 	
 	unsigned coarse_bounds_count = aligned_coarse_count >> simdv_width32_log2;
 	AABBV* coarse_bounds = allocate_array<AABBV>(&temporary, coarse_bounds_count, simdv_alignment);
-
+    
+	printf("AA aligned_count, coarse_count, aligned_coarse_count, coarse_bounds_count, bounds_count\n");
 	printf("AA %u, %u, %u, %u, %u \n", aligned_count, coarse_count, aligned_coarse_count, coarse_bounds_count, bounds_count);
 	
 	for (unsigned i = 0; i < coarse_count; ++i) {
@@ -3696,10 +3732,6 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 #if NUDGE_SIMDV_WIDTH <= 256
 		unsigned start = i << (3 - simdv_width32_log2);
 		unsigned offset0 = 0;
-#else
-		unsigned start = i >> (simdv_width32_log2 - 3);
-		unsigned offset0 = i % 2 ? 8 : 0;
-#endif
 		
 		simd4_float coarse_min_x = simd_float::load4(bounds[start].min_x + offset0);
 		simd4_float coarse_max_x = simd_float::load4(bounds[start].max_x + offset0);
@@ -3709,7 +3741,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		simd4_float coarse_max_z = simd_float::load4(bounds[start].max_z + offset0);
 		
 		// Note that the first operand is returned on NaN. The last padded bounds are NaN, so the earlier bounds should be in the first operand.
-#if NUDGE_SIMDV_WIDTH >= 256
+#if NUDGE_SIMDV_WIDTH == 256
 		coarse_min_x = simd_float::min(coarse_min_x, simd_float::load4(bounds[start].min_x + offset0 + 4));
 		coarse_max_x = simd_float::max(coarse_max_x, simd_float::load4(bounds[start].max_x + offset0 + 4));
 		coarse_min_y = simd_float::min(coarse_min_y, simd_float::load4(bounds[start].min_y + offset0 + 4));
@@ -3738,17 +3770,41 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		coarse_max_y = simd_float::max(coarse_max_y, simd128::shuffle32<1,0,3,2>(coarse_max_y));
 		coarse_min_z = simd_float::min(coarse_min_z, simd128::shuffle32<1,0,3,2>(coarse_min_z));
 		coarse_max_z = simd_float::max(coarse_max_z, simd128::shuffle32<1,0,3,2>(coarse_max_z));
+#elif NUDGE_SIMDV_WIDTH == 512
+        unsigned start = i;
+        simdv_float coarse_min_x = simd_float::load16(bounds[start].min_x);
+		simdv_float coarse_max_x = simd_float::load16(bounds[start].max_x);
+		simdv_float coarse_min_y = simd_float::load16(bounds[start].min_y);
+		simdv_float coarse_max_y = simd_float::load16(bounds[start].max_y);
+		simdv_float coarse_min_z = simd_float::load16(bounds[start].min_z);
+		simdv_float coarse_max_z = simd_float::load16(bounds[start].max_z);
+		// coarse_min_x  = _mm512_reduce_min_ps(coarse_min_x);
+		// coarse_max_x  = _mm512_reduce_max_ps(coarse_max_x);
+		// coarse_min_y  = _mm512_reduce_min_ps(coarse_min_y);
+		// coarse_max_y  = _mm512_reduce_max_ps(coarse_max_y);
+		// coarse_min_z  = _mm512_reduce_min_ps(coarse_min_z);
+		// coarse_max_z  = _mm512_reduce_max_ps(coarse_max_z);
+#endif
 		
 		unsigned bounds_group = i >> simdv_width32_log2;
 		unsigned bounds_lane = i & (simdv_width32-1);
-		printf(" %u, %u, %u, %u \n", i, bounds_group, bounds_lane, start);
+		// printf(" %u, %u, %u, %u \n", i, bounds_group, bounds_lane, start);
 		
+#if NUDGE_SIMDV_WIDTH == 512
+        coarse_bounds[bounds_group].min_x[bounds_lane] = _mm512_reduce_min_ps(coarse_min_x);
+		coarse_bounds[bounds_group].max_x[bounds_lane] = _mm512_reduce_max_ps(coarse_max_x);
+		coarse_bounds[bounds_group].min_y[bounds_lane] = _mm512_reduce_min_ps(coarse_min_y);
+		coarse_bounds[bounds_group].max_y[bounds_lane] = _mm512_reduce_max_ps(coarse_max_y);
+		coarse_bounds[bounds_group].min_z[bounds_lane] = _mm512_reduce_min_ps(coarse_min_z);
+		coarse_bounds[bounds_group].max_z[bounds_lane] = _mm512_reduce_max_ps(coarse_max_z);
+#else		
 		coarse_bounds[bounds_group].min_x[bounds_lane] = simd_float::extract_first_float(coarse_min_x);
 		coarse_bounds[bounds_group].max_x[bounds_lane] = simd_float::extract_first_float(coarse_max_x);
 		coarse_bounds[bounds_group].min_y[bounds_lane] = simd_float::extract_first_float(coarse_min_y);
 		coarse_bounds[bounds_group].max_y[bounds_lane] = simd_float::extract_first_float(coarse_max_y);
 		coarse_bounds[bounds_group].min_z[bounds_lane] = simd_float::extract_first_float(coarse_min_z);
 		coarse_bounds[bounds_group].max_z[bounds_lane] = simd_float::extract_first_float(coarse_max_z);
+#endif
 	}
 	
 	for (unsigned i = coarse_count; i < aligned_coarse_count; ++i) {
@@ -3762,6 +3818,14 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		coarse_bounds[bounds_group].min_z[bounds_lane] = NAN;
 		coarse_bounds[bounds_group].max_z[bounds_lane] = NAN;
 	}
+    // printf("minx: [");
+    // for(int i = 0; i < simdv_width32; ++i)
+	//    printf("%f, ", coarse_bounds[0].min_x[i]);
+	// printf("]\n");
+	// printf("maxx: [");
+    // for(int i = 0; i < simdv_width32; ++i)
+	//    printf("%f, ", coarse_bounds[0].max_x[i]);
+	// printf("]\n");
 	
 	// Test all coarse groups against each other and generate pairs with potential overlap.
 	uint32_t* coarse_groups = reserve_array<uint32_t>(&temporary, coarse_count*coarse_count, 32);
@@ -3777,15 +3841,15 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		simdv_float max_a_y = simd_float::broadcast_loadv(coarse_bounds[bounds_group].max_y + bounds_lane);
 		simdv_float min_a_z = simd_float::broadcast_loadv(coarse_bounds[bounds_group].min_z + bounds_lane);
 		simdv_float max_a_z = simd_float::broadcast_loadv(coarse_bounds[bounds_group].max_z + bounds_lane);
-		
+
 		unsigned first = coarse_group_count;
-		
+
 		// Maximum number of colliders is 2^13, i.e., 13 bit indices.
 		// i needs 10 bits.
 		// j needs 7 or 8 bits.
 		// mask needs 4 or 8 bits.
 		unsigned ij_bits = (bounds_group << 8) | (i << 16);
-		
+
 		for (unsigned j = bounds_group; j < coarse_bounds_count; ++j) {
 			simdv_float min_b_x = simd_float::loadv(coarse_bounds[j].min_x);
 			simdv_float max_b_x = simd_float::loadv(coarse_bounds[j].max_x);
@@ -3793,23 +3857,30 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 			simdv_float max_b_y = simd_float::loadv(coarse_bounds[j].max_y);
 			simdv_float min_b_z = simd_float::loadv(coarse_bounds[j].min_z);
 			simdv_float max_b_z = simd_float::loadv(coarse_bounds[j].max_z);
-			
+
 			simdv_float inside_x = simd::bitwise_and(simd_float::cmp_gt(max_b_x, min_a_x), simd_float::cmp_gt(max_a_x, min_b_x));
 			simdv_float inside_y = simd::bitwise_and(simd_float::cmp_gt(max_b_y, min_a_y), simd_float::cmp_gt(max_a_y, min_b_y));
 			simdv_float inside_z = simd::bitwise_and(simd_float::cmp_gt(max_b_z, min_a_z), simd_float::cmp_gt(max_a_z, min_b_z));
-			
+
 			unsigned mask = simd::signmask32(simd::bitwise_and(simd::bitwise_and(inside_x, inside_y), inside_z));
-			
+
+			// simdv_float mask_f = simd_float::cmp_gt(max_b_x, min_a_x);
+
 			coarse_groups[coarse_group_count] = mask | ij_bits;
 			coarse_group_count += mask != 0;
-			
+			// printf("i: %u, j: %u, mask: %u\n", i, j, mask);
+			// print_m512(mask_f);
+			// print_m512(inside_x);
+			// print_m512(inside_y);
+			// print_m512(inside_z);
+
 			ij_bits += 1 << 8;
 		}
-		
+
 		// Mask out collisions already handled.
 		coarse_groups[first] &= ~((1 << bounds_lane) - 1);
 	}
-	
+
 	commit_array<uint32_t>(&temporary, coarse_group_count);
 	
 	uint32_t* coarse_pairs = reserve_array<uint32_t>(&temporary, coarse_group_count*simdv_width32, 32);
