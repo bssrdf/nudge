@@ -3688,25 +3688,34 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	
 	unsigned coarse_bounds_count = aligned_coarse_count >> simdv_width32_log2;
 	AABBV* coarse_bounds = allocate_array<AABBV>(&temporary, coarse_bounds_count, simdv_alignment);
+
+	printf("AA %u, %u, %u, %u, %u \n", aligned_count, coarse_count, aligned_coarse_count, coarse_bounds_count, bounds_count);
 	
 	for (unsigned i = 0; i < coarse_count; ++i) {
-		unsigned start = i << ((3 > simdv_width32_log2) ? (3 - simdv_width32_log2) : 0);
+		// unsigned start = i << ((3 > simdv_width32_log2) ? (3 - simdv_width32_log2) : 0);
+#if NUDGE_SIMDV_WIDTH <= 256
+		unsigned start = i << (3 - simdv_width32_log2);
+		unsigned offset0 = 0;
+#else
+		unsigned start = i >> (simdv_width32_log2 - 3);
+		unsigned offset0 = i % 2 ? 8 : 0;
+#endif
 		
-		simd4_float coarse_min_x = simd_float::load4(bounds[start].min_x);
-		simd4_float coarse_max_x = simd_float::load4(bounds[start].max_x);
-		simd4_float coarse_min_y = simd_float::load4(bounds[start].min_y);
-		simd4_float coarse_max_y = simd_float::load4(bounds[start].max_y);
-		simd4_float coarse_min_z = simd_float::load4(bounds[start].min_z);
-		simd4_float coarse_max_z = simd_float::load4(bounds[start].max_z);
+		simd4_float coarse_min_x = simd_float::load4(bounds[start].min_x + offset0);
+		simd4_float coarse_max_x = simd_float::load4(bounds[start].max_x + offset0);
+		simd4_float coarse_min_y = simd_float::load4(bounds[start].min_y + offset0);
+		simd4_float coarse_max_y = simd_float::load4(bounds[start].max_y + offset0);
+		simd4_float coarse_min_z = simd_float::load4(bounds[start].min_z + offset0);
+		simd4_float coarse_max_z = simd_float::load4(bounds[start].max_z + offset0);
 		
 		// Note that the first operand is returned on NaN. The last padded bounds are NaN, so the earlier bounds should be in the first operand.
-#if NUDGE_SIMDV_WIDTH == 256
-		coarse_min_x = simd_float::min(coarse_min_x, simd_float::load4(bounds[start].min_x + 4));
-		coarse_max_x = simd_float::max(coarse_max_x, simd_float::load4(bounds[start].max_x + 4));
-		coarse_min_y = simd_float::min(coarse_min_y, simd_float::load4(bounds[start].min_y + 4));
-		coarse_max_y = simd_float::max(coarse_max_y, simd_float::load4(bounds[start].max_y + 4));
-		coarse_min_z = simd_float::min(coarse_min_z, simd_float::load4(bounds[start].min_z + 4));
-		coarse_max_z = simd_float::max(coarse_max_z, simd_float::load4(bounds[start].max_z + 4));
+#if NUDGE_SIMDV_WIDTH >= 256
+		coarse_min_x = simd_float::min(coarse_min_x, simd_float::load4(bounds[start].min_x + offset0 + 4));
+		coarse_max_x = simd_float::max(coarse_max_x, simd_float::load4(bounds[start].max_x + offset0 + 4));
+		coarse_min_y = simd_float::min(coarse_min_y, simd_float::load4(bounds[start].min_y + offset0 + 4));
+		coarse_max_y = simd_float::max(coarse_max_y, simd_float::load4(bounds[start].max_y + offset0 + 4));
+		coarse_min_z = simd_float::min(coarse_min_z, simd_float::load4(bounds[start].min_z + offset0 + 4));
+		coarse_max_z = simd_float::max(coarse_max_z, simd_float::load4(bounds[start].max_z + offset0 + 4));
 #else
 		coarse_min_x = simd_float::min(coarse_min_x, simd_float::load4(bounds[start+1].min_x));
 		coarse_max_x = simd_float::max(coarse_max_x, simd_float::load4(bounds[start+1].max_x));
@@ -3732,6 +3741,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		
 		unsigned bounds_group = i >> simdv_width32_log2;
 		unsigned bounds_lane = i & (simdv_width32-1);
+		printf(" %u, %u, %u, %u \n", i, bounds_group, bounds_lane, start);
 		
 		coarse_bounds[bounds_group].min_x[bounds_lane] = simd_float::extract_first_float(coarse_min_x);
 		coarse_bounds[bounds_group].max_x[bounds_lane] = simd_float::extract_first_float(coarse_max_x);
@@ -3825,7 +3835,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	// Test AABBs within the coarse pairs.
 	uint32_t* groups = reserve_array<uint32_t>(&temporary, coarse_pair_count*16, 32);
 	unsigned group_count = 0;
-	printf("Coarse pairs count: %u\n", coarse_pair_count);
+	printf("Coarse group count: %u Coarse pairs count: %u\n", coarse_group_count, coarse_pair_count);
 	
 #if NUDGE_SIMDV_WIDTH == 512
 	// Each coarse cell has 8 sub-colliders. bounds[g] holds 16 colliders (= 2 coarse cells).
