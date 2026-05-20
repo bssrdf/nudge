@@ -16,6 +16,7 @@
 build/
 cmake-build-*/
 out/
+example/win/*.txt
 example/win/x64/
 example/win/example
 

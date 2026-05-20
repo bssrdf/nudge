@@ -3310,6 +3310,15 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		bounds[bounds_group].min_z[bounds_lane] = NAN;
 		bounds[bounds_group].max_z[bounds_lane] = NAN;
 	}
+	// printf("minx: [");
+    // for(int i = 0; i < simdv_width32; ++i)
+	//    printf("%f, ", bounds[0].min_x[i]);
+	// printf("]\n");
+	// printf("maxx: [");
+    // for(int i = 0; i < simdv_width32; ++i)
+	//    printf("%f, ", bounds[0].max_x[i]);
+	// printf("]\n");
+	
 	
 	// Pack each set of 8 consecutive AABBs into coarse AABBs.
 	unsigned coarse_count = aligned_count >> 3;
@@ -3382,6 +3391,18 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		coarse_bounds[bounds_group].min_z[bounds_lane] = NAN;
 		coarse_bounds[bounds_group].max_z[bounds_lane] = NAN;
 	}
+	// printf("minx: [");
+    // for(int i = 0; i < simdv_width32; ++i)
+	//    printf("%f, ", coarse_bounds[0].min_x[i]);
+	// for(int i = 0; i < simdv_width32; ++i)
+	//    printf("%f, ", coarse_bounds[1].min_x[i]);
+	// printf("]\n");
+	// printf("maxx: [");
+    // for(int i = 0; i < simdv_width32; ++i)
+	//    printf("%f, ", coarse_bounds[0].max_x[i]);
+	// for(int i = 0; i < simdv_width32; ++i)
+	//    printf("%f, ", coarse_bounds[1].max_x[i]);
+	// printf("]\n");
 	
 	// Test all coarse groups against each other and generate pairs with potential overlap.
 	uint32_t* coarse_groups = reserve_array<uint32_t>(&temporary, coarse_count*coarse_count, 32);
@@ -3422,6 +3443,8 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 			
 			coarse_groups[coarse_group_count] = mask | ij_bits;
 			coarse_group_count += mask != 0;
+			// if(mask != 0)
+			//    printf("Coarse group pair:%u, %u, %u, %u, mask: %u\n", i, bounds_group, bounds_lane, j, mask);
 			
 			ij_bits += 1 << 8;
 		}
