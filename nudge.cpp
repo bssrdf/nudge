@@ -3405,7 +3405,8 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	// printf("]\n");
 	
 	// Test all coarse groups against each other and generate pairs with potential overlap.
-	uint32_t* coarse_groups = reserve_array<uint32_t>(&temporary, coarse_count*coarse_count, 32);
+	// uint32_t* coarse_groups = reserve_array<uint32_t>(&temporary, coarse_count*coarse_count, 32);
+	uint64_t* coarse_groups = reserve_array<uint64_t>(&temporary, coarse_count*coarse_count, 64);
 	unsigned coarse_group_count = 0;
 	
 	for (unsigned i = 0; i < coarse_count; ++i) {
@@ -3425,7 +3426,8 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		// i needs 10 bits.
 		// j needs 7 or 8 bits.
 		// mask needs 4 or 8 bits.
-		unsigned ij_bits = (bounds_group << 8) | (i << 16);
+		// unsigned ij_bits = (bounds_group << 8) | (i << 16);
+		uint64_t ij_bits = (bounds_group << 16) | ((uint64_t)i << 32);
 		
 		for (unsigned j = bounds_group; j < coarse_bounds_count; ++j) {
 			simdv_float min_b_x = simd_float::loadv(coarse_bounds[j].min_x);
@@ -3441,34 +3443,41 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 			
 			unsigned mask = simd::signmask32(simd::bitwise_and(simd::bitwise_and(inside_x, inside_y), inside_z));
 			
-			coarse_groups[coarse_group_count] = mask | ij_bits;
+			// coarse_groups[coarse_group_count] = mask | ij_bits;
+			coarse_groups[coarse_group_count] = (uint64_t)(mask) | ij_bits;
 			coarse_group_count += mask != 0;
 			// if(mask != 0)
 			//    printf("Coarse group pair:%u, %u, %u, %u, mask: %u\n", i, bounds_group, bounds_lane, j, mask);
 			
-			ij_bits += 1 << 8;
+			// ij_bits += 1 << 8;
+			ij_bits += 1 << 16;
 		}
 		
 		// Mask out collisions already handled.
 		coarse_groups[first] &= ~((1 << bounds_lane) - 1);
 	}
 	
-	commit_array<uint32_t>(&temporary, coarse_group_count);
+	// commit_array<uint32_t>(&temporary, coarse_group_count);
+	commit_array<uint64_t>(&temporary, coarse_group_count);
 	
 	uint32_t* coarse_pairs = reserve_array<uint32_t>(&temporary, coarse_group_count*simdv_width32, 32);
+	// uint64_t* coarse_pairs = reserve_array<uint64_t>(&temporary, coarse_group_count*simdv_width32, 64);
 	unsigned coarse_pair_count = 0;
 	
 	for (unsigned i = 0; i < coarse_group_count; ++i) {
-		unsigned group = coarse_groups[i];
-		unsigned mask = group & 0xff;
-		
-		unsigned batch = (group & 0xff00) >> (8 - simdv_width32_log2);
-		unsigned other = group & 0xffff0000;
-		
+		// unsigned group = coarse_groups[i];
+		uint64_t group = coarse_groups[i];
+		// unsigned mask = group & 0xff;
+		unsigned mask = (unsigned)(group & 0xffff);
+
+		// unsigned batch = (group & 0xff00) >> (8 - simdv_width32_log2);
+		unsigned batch = (unsigned)((group & 0xffff0000) >> (16 - simdv_width32_log2));
+		// unsigned other = group & 0xffff0000;
+		unsigned other = ((unsigned)(group >> 32)) << 16;
+
 		while (mask) {
 			unsigned index = first_set_bit(mask);
 			mask &= mask-1;
-			
 			coarse_pairs[coarse_pair_count++] = other | (batch + index);
 		}
 	}
@@ -3477,6 +3486,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	
 	// Test AABBs within the coarse pairs.
 	uint32_t* groups = reserve_array<uint32_t>(&temporary, coarse_pair_count*16, 32);
+	// uint64_t* groups = reserve_array<uint64_t>(&temporary, coarse_pair_count*16, 64);
 	unsigned group_count = 0;
 	printf("Coarse group count: %u Coarse pairs count: %u\n", coarse_group_count, coarse_pair_count);
 	
