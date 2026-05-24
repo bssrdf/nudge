@@ -830,12 +830,16 @@ inline __m512& operator *= (__m512& a, __m512 b) { return a = _mm512_mul_ps(a, b
 inline __m512& operator /= (__m512& a, __m512 b) { return a = _mm512_div_ps(a, b); }
 
 namespace simd512 {
-	NUDGE_FORCEINLINE simd16_float broadcast(simd8_float x) { __m512 t = _mm512_castps256_ps512(x); return _mm512_insertf32x8(t, x, 1); }
-	NUDGE_FORCEINLINE simd16_int32 broadcast(simd8_int32 x) { __m512i t = _mm512_castsi256_si512(x); return _mm512_inserti32x8(t, x, 1); }
-	NUDGE_FORCEINLINE simd16_float broadcast(simd4_float x) { return _mm512_broadcast_f32x4(_mm_loadu_ps(reinterpret_cast<const float*>(&x))); }
-	NUDGE_FORCEINLINE simd16_int32 broadcast(simd4_int32 x) { return _mm512_broadcast_i32x4(_mm_loadu_si128(reinterpret_cast<const __m128i*>(&x))); }
-	template<unsigned i0, unsigned i1> NUDGE_FORCEINLINE simd16_float shuffle128(simd16_float x) { return _mm512_shuffle_f32x4(x, x, _MM_SHUFFLE(i1, i1, i0, i0)); }
-	template<unsigned i0, unsigned i1> NUDGE_FORCEINLINE simd16_int32 shuffle128(simd16_int32 x) { return _mm512_shuffle_i32x4(x, x, _MM_SHUFFLE(i1, i1, i0, i0)); }
+	// NUDGE_FORCEINLINE simd16_float broadcast(simd8_float x) { __m512 t = _mm512_castps256_ps512(x); return _mm512_insertf32x8(t, x, 1); }
+	// NUDGE_FORCEINLINE simd16_int32 broadcast(simd8_int32 x) { __m512i t = _mm512_castsi256_si512(x); return _mm512_inserti32x8(t, x, 1); }
+	NUDGE_FORCEINLINE simd16_float broadcast(simd8_float x) { return _mm512_broadcast_f32x8(x);}
+	NUDGE_FORCEINLINE simd16_int32 broadcast(simd8_int32 x) { return _mm512_broadcast_i32x8(x); }
+	NUDGE_FORCEINLINE simd16_float broadcast(simd4_float x) { return _mm512_broadcast_f32x4(x); }
+	NUDGE_FORCEINLINE simd16_int32 broadcast(simd4_int32 x) { return _mm512_broadcast_i32x4(x); }
+	template<unsigned i0, unsigned i1, unsigned i2, unsigned i3>
+	NUDGE_FORCEINLINE simd16_float shuffle128(simd16_float x) { return _mm512_shuffle_f32x4(x, x, _MM_SHUFFLE(i3, i2, i1, i0)); }
+	template<unsigned i0, unsigned i1, unsigned i2, unsigned i3>
+	NUDGE_FORCEINLINE simd16_int32 shuffle128(simd16_int32 x) { return _mm512_shuffle_i32x4(x, x, _MM_SHUFFLE(i3, i2, i1, i0)); }
 
 	// template<unsigned i0, unsigned i1>
 	// NUDGE_FORCEINLINE simd8_float permute128(simd8_float x, simd8_float y) {
@@ -2318,33 +2322,28 @@ static unsigned box_box_collide(uint32_t* pairs, unsigned pair_count, BoxCollide
 				
 				if (b_offset_neg)
 					z_sign = simd_float::makev(-0.0f);
-				
+
 #if NUDGE_SIMDV_WIDTH == 256
 				simdv_float penetration_offset = simd256::broadcast(simd128::shuffle32<2,2,2,2>(a_size_transformed));
 				simdv_float plane256 = simd256::broadcast(plane);
 #elif NUDGE_SIMDV_WIDTH == 512
 				simdv_float penetration_offset = simd512::broadcast(simd128::shuffle32<2,2,2,2>(a_size_transformed));
-				simdv_float plane256 = simd512::broadcast(plane);
+				simdv_float plane512 = simd512::broadcast(plane);
 #else
 				simdv_float penetration_offset = simd128::shuffle32<2,2,2,2>(a_size_transformed);
 #endif
 				unsigned penetration_mask = 0;
-				
+
 				for (unsigned i = 0; i < 16; i += simdv_width32) {
 #if NUDGE_SIMDV_WIDTH == 256
 					simdv_float plane = plane256;
 #elif NUDGE_SIMDV_WIDTH == 512
-					simdv_float plane = plane256;
+					simdv_float plane = plane512;
 #endif
-					
 					simdv_float x = simd_float::loadv(support + 0 + i);
 					simdv_float y = simd_float::loadv(support + 16 + i);
-#if NUDGE_SIMDV_WIDTH == 256
-					simd4_float pl4 = simd::extract_low(plane256);
-					simdv_float z = x*plane256 + y*simd256::broadcast(simd128::shuffle32<1,1,1,1>(pl4)) + simd256::broadcast(simd128::shuffle32<2,2,2,2>(pl4));
-#elif NUDGE_SIMDV_WIDTH == 512
-					simd4_float pl4 = simd::extract_low(simd::extract_low(plane256));
-					simdv_float z = x*simd512::broadcast(simd128::shuffle32<0,0,0,0>(pl4)) + y*simd512::broadcast(simd128::shuffle32<1,1,1,1>(pl4)) + simd512::broadcast(simd128::shuffle32<2,2,2,2>(pl4));
+#if NUDGE_SIMDV_WIDTH == 512
+                    simdv_float z = x*simd512::shuffle128<0,0,0,0>(plane) + y*simd512::shuffle128<1,1,1,1>(plane) + simd512::shuffle128<2,2,2,2>(plane);
 #else
 					simdv_float z = x*simd128::shuffle32<0,0,0,0>(plane) + y*simd128::shuffle32<1,1,1,1>(plane) + simd128::shuffle32<2,2,2,2>(plane);
 #endif
@@ -3289,7 +3288,7 @@ NUDGE_FORCEINLINE static void load8(const float* data, const T* indices,
 	d5 = simd256::permute128<1,3>(t1, t5);
 	d6 = simd256::permute128<1,3>(t2, t6);
 	d7 = simd256::permute128<1,3>(t3, t7);
-#elif NUDGE_SIMDV_WIDTH == 256
+#elif NUDGE_SIMDV_WIDTH == 128
 	unsigned i0 = indices[0*index_stride];
 	unsigned i1 = indices[1*index_stride];
 	unsigned i2 = indices[2*index_stride];
@@ -3828,7 +3827,8 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	// printf("]\n");
 	
 	// Test all coarse groups against each other and generate pairs with potential overlap.
-	uint32_t* coarse_groups = reserve_array<uint32_t>(&temporary, coarse_count*coarse_count, 32);
+	// uint32_t* coarse_groups = reserve_array<uint32_t>(&temporary, coarse_count*coarse_count, 32);
+	uint64_t* coarse_groups = reserve_array<uint64_t>(&temporary, coarse_count*coarse_count, 64);
 	unsigned coarse_group_count = 0;
 	
 	for (unsigned i = 0; i < coarse_count; ++i) {
@@ -3848,7 +3848,8 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		// i needs 10 bits.
 		// j needs 7 or 8 bits.
 		// mask needs 4 or 8 bits.
-		unsigned ij_bits = (bounds_group << 8) | (i << 16);
+		// unsigned ij_bits = (bounds_group << 8) | (i << 16);
+		uint64_t ij_bits = (bounds_group << 16) | ((uint64_t)i << 32);
 
 		for (unsigned j = bounds_group; j < coarse_bounds_count; ++j) {
 			simdv_float min_b_x = simd_float::loadv(coarse_bounds[j].min_x);
@@ -3864,9 +3865,9 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 
 			unsigned mask = simd::signmask32(simd::bitwise_and(simd::bitwise_and(inside_x, inside_y), inside_z));
 
-			// simdv_float mask_f = simd_float::cmp_gt(max_b_x, min_a_x);
 
-			coarse_groups[coarse_group_count] = mask | ij_bits;
+			// coarse_groups[coarse_group_count] = mask | ij_bits;
+			coarse_groups[coarse_group_count] = (uint64_t)(mask) | ij_bits;
 			coarse_group_count += mask != 0;
 			// printf("i: %u, j: %u, mask: %u\n", i, j, mask);
 			// print_m512(mask_f);
@@ -3874,37 +3875,43 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 			// print_m512(inside_y);
 			// print_m512(inside_z);
 
-			ij_bits += 1 << 8;
+			// ij_bits += 1 << 8;
+			ij_bits += 1 << 16;
 		}
 
 		// Mask out collisions already handled.
 		coarse_groups[first] &= ~((1 << bounds_lane) - 1);
 	}
 
-	commit_array<uint32_t>(&temporary, coarse_group_count);
-	
+	// commit_array<uint32_t>(&temporary, coarse_group_count);
+	commit_array<uint64_t>(&temporary, coarse_group_count);
+
 	uint32_t* coarse_pairs = reserve_array<uint32_t>(&temporary, coarse_group_count*simdv_width32, 32);
 	unsigned coarse_pair_count = 0;
-	
+
 	for (unsigned i = 0; i < coarse_group_count; ++i) {
-		unsigned group = coarse_groups[i];
-		unsigned mask = group & 0xff;
-		
-		unsigned batch = (group & 0xff00) >> (8 - simdv_width32_log2);
-		unsigned other = group & 0xffff0000;
-		
+		// unsigned group = coarse_groups[i];
+		uint64_t group = coarse_groups[i];
+		// unsigned mask = group & 0xff;
+		unsigned mask = (unsigned)(group & 0xffff);
+
+		// unsigned batch = (group & 0xff00) >> (8 - simdv_width32_log2);
+		unsigned batch = (unsigned)((group & 0xffff0000) >> (16 - simdv_width32_log2));
+		// unsigned other = group & 0xffff0000;
+		unsigned other = ((unsigned)(group >> 32)) << 16;
+
 		while (mask) {
 			unsigned index = first_set_bit(mask);
 			mask &= mask-1;
-			
 			coarse_pairs[coarse_pair_count++] = other | (batch + index);
 		}
 	}
-	
+
 	commit_array<uint32_t>(&temporary, coarse_pair_count);
-	
+
 	// Test AABBs within the coarse pairs.
-	uint32_t* groups = reserve_array<uint32_t>(&temporary, coarse_pair_count*16, 32);
+	// uint32_t* groups = reserve_array<uint32_t>(&temporary, coarse_pair_count*16, 32);
+	uint64_t* groups = reserve_array<uint64_t>(&temporary, coarse_pair_count*16, 64);
 	unsigned group_count = 0;
 	printf("Coarse group count: %u Coarse pairs count: %u\n", coarse_group_count, coarse_pair_count);
 	
@@ -3914,73 +3921,56 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	// Load 8 colliders into lower 8 lanes, pad upper 8 lanes with sentinel values that never collide.
 	for (unsigned n = 0; n < coarse_pair_count; ++n) {
 		unsigned pair = coarse_pairs[n];
-		
+
 		unsigned a = pair >> 16;
 		unsigned b = pair & 0xffff;
-		
-		unsigned lane_count = 8;
-		
+
+		unsigned lane_count = 16;
+
 		if (a == b)
 			--lane_count;
-		
-		if (lane_count + (a << 3) > count)
-			lane_count = count - (a << 3);
-		
-		unsigned ij_bits = (b << 8) | (a << 22);
+
+		if (lane_count + (a << 4) > count)
+			lane_count = count - (a << 4);
+
+		// unsigned ij_bits = (b << 8) | (a << 22);
+		// 64-bit encoding:
+		// bits 0-15:  16-bit mask
+		// bits 16-31: 16-bit batch (coarse cell B index)
+		// bits 32+:   object A index
+		uint64_t ij_bits = (uint64_t)b << 16 | (uint64_t)(a * 16) << 32;
 		unsigned lower_lane_mask = a == b ? 0xfe00 : 0xffff;
-		
-		// Load b-colliders into lower 8 lanes, pad upper 8 lanes with sentinels.
-		unsigned b_group = b >> 1;
-		const float* b_min_x_ptr = bounds[b_group].min_x + ((b & 1) << 3);
-		const float* b_max_x_ptr = bounds[b_group].max_x + ((b & 1) << 3);
-		const float* b_min_y_ptr = bounds[b_group].min_y + ((b & 1) << 3);
-		const float* b_max_y_ptr = bounds[b_group].max_y + ((b & 1) << 3);
-		const float* b_min_z_ptr = bounds[b_group].min_z + ((b & 1) << 3);
-		const float* b_max_z_ptr = bounds[b_group].max_z + ((b & 1) << 3);
-		
-		simd8_float b_min_x_lo = simd_float::load8(b_min_x_ptr);
-		simd8_float b_max_x_lo = simd_float::load8(b_max_x_ptr);
-		simd8_float b_min_y_lo = simd_float::load8(b_min_y_ptr);
-		simd8_float b_max_y_lo = simd_float::load8(b_max_y_ptr);
-		simd8_float b_min_z_lo = simd_float::load8(b_min_z_ptr);
-		simd8_float b_max_z_lo = simd_float::load8(b_max_z_ptr);
-		
-		simd8_float inf8 = simd_float::make8(INFINITY);
-		simd8_float ninf8 = simd_float::make8(-INFINITY);
-		
-		simdv_float min_b_x = simd::concat(b_min_x_lo, inf8);
-		simdv_float max_b_x = simd::concat(b_max_x_lo, ninf8);
-		simdv_float min_b_y = simd::concat(b_min_y_lo, inf8);
-		simdv_float max_b_y = simd::concat(b_max_y_lo, ninf8);
-		simdv_float min_b_z = simd::concat(b_min_z_lo, inf8);
-		simdv_float max_b_z = simd::concat(b_max_z_lo, ninf8);
-		
-		unsigned a_group = a >> 1;
-		unsigned a_start_lane = (a & 1) << 3;
-		
-		for (unsigned i = 0; i < lane_count; ++i, ij_bits += (1 << 19)) {
-			unsigned lane = a_start_lane + i;
-			
-			simdv_float min_a_x = simd_float::broadcast_loadv(bounds[a_group].min_x + lane);
-			simdv_float max_a_x = simd_float::broadcast_loadv(bounds[a_group].max_x + lane);
-			simdv_float min_a_y = simd_float::broadcast_loadv(bounds[a_group].min_y + lane);
-			simdv_float max_a_y = simd_float::broadcast_loadv(bounds[a_group].max_y + lane);
-			simdv_float min_a_z = simd_float::broadcast_loadv(bounds[a_group].min_z + lane);
-			simdv_float max_a_z = simd_float::broadcast_loadv(bounds[a_group].max_z + lane);
-			
+
+		simdv_float min_b_x = simd_float::loadv(bounds[b].min_x);
+		simdv_float max_b_x = simd_float::loadv(bounds[b].max_x);
+		simdv_float min_b_y = simd_float::loadv(bounds[b].min_y);
+		simdv_float max_b_y = simd_float::loadv(bounds[b].max_y);
+		simdv_float min_b_z = simd_float::loadv(bounds[b].min_z);
+		simdv_float max_b_z = simd_float::loadv(bounds[b].max_z);
+
+		// for (unsigned i = 0; i < lane_count; ++i, ij_bits += (1 << 19)) {
+		for (unsigned i = 0; i < lane_count; ++i, ij_bits += 1ULL << 32) {
+			// unsigned lane = a_start_lane + i;
+			simdv_float min_a_x = simd_float::broadcast_loadv(bounds[a].min_x + i);
+			simdv_float max_a_x = simd_float::broadcast_loadv(bounds[a].max_x + i);
+			simdv_float min_a_y = simd_float::broadcast_loadv(bounds[a].min_y + i);
+			simdv_float max_a_y = simd_float::broadcast_loadv(bounds[a].max_y + i);
+			simdv_float min_a_z = simd_float::broadcast_loadv(bounds[a].min_z + i);
+			simdv_float max_a_z = simd_float::broadcast_loadv(bounds[a].max_z + i);
+
 			simdv_float inside_x = simd::bitwise_and(simd_float::cmp_gt(max_b_x, min_a_x), simd_float::cmp_gt(max_a_x, min_b_x));
 			simdv_float inside_y = simd::bitwise_and(simd_float::cmp_gt(max_b_y, min_a_y), simd_float::cmp_gt(max_a_y, min_b_y));
 			simdv_float inside_z = simd::bitwise_and(simd_float::cmp_gt(max_b_z, min_a_z), simd_float::cmp_gt(max_a_z, min_b_z));
-			
-			// Extract only the lower 8 bits (upper 8 lanes are sentinels and never match).
-			unsigned mask = simd::signmask32(simd::bitwise_and(simd::bitwise_and(inside_x, inside_y), inside_z)) & 0xff;
-			
+
+			unsigned mask = simd::signmask32(simd::bitwise_and(simd::bitwise_and(inside_x, inside_y), inside_z));
+
 			// Mask out collisions already handled.
 			mask &= lower_lane_mask >> 8;
 			lower_lane_mask <<= 1;
-			
-			groups[group_count] = mask | ij_bits;
+
+			groups[group_count] = (uint64_t)mask | ij_bits;
 			group_count += mask != 0;
+
 		}
 	}
 #elif NUDGE_SIMDV_WIDTH == 256
@@ -4004,7 +3994,8 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		// mask needs 4 or 8 bits.
 		unsigned ij_bits = (b << 8) | (a << 22);
 		
-		unsigned lower_lane_mask = a == b ? 0xfe00 : 0xffff;
+		// unsigned lower_lane_mask = a == b ? 0xfe00 : 0xffff;
+		unsigned lower_lane_mask = a == b ? 0xfffe0000 : 0xffffffff;
 		
 		simdv_float min_b_x = simd_float::loadv(bounds[b].min_x);
 		simdv_float max_b_x = simd_float::loadv(bounds[b].max_x);
@@ -4028,7 +4019,8 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 			unsigned mask = simd::signmask32(simd::bitwise_and(simd::bitwise_and(inside_x, inside_y), inside_z));
 			
 			// Mask out collisions already handled.
-			mask &= lower_lane_mask >> 8;
+			// mask &= lower_lane_mask >> 8;
+			mask &= lower_lane_mask >> 16;
 			lower_lane_mask <<= 1;
 			
 			groups[group_count] = mask | ij_bits;
@@ -4107,17 +4099,24 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	}
 #endif
 	
-	commit_array<uint32_t>(&temporary, group_count);
+	// commit_array<uint32_t>(&temporary, group_count);
+	commit_array<uint64_t>(&temporary, group_count);
 	
 	uint32_t* pairs = reserve_array<uint32_t>(&temporary, group_count*simdv_width32, 32);
 	unsigned pair_count = 0;
 	
 	for (unsigned i = 0; i < group_count; ++i) {
-		unsigned group = groups[i];
-		unsigned mask = group & 0xff;
+		// unsigned group = groups[i];
+		// unsigned mask = group & 0xff;
 		
-		unsigned batch = (group & 0x7ff00) >> (8 - simdv_width32_log2);
-		unsigned base = ((uint32_t)(group >> 19) << 16) | batch;
+		// unsigned batch = (group & 0x7ff00) >> (8 - simdv_width32_log2);
+		// unsigned base = ((uint32_t)(group >> 19) << 16) | batch;
+		uint64_t group = groups[i];
+		unsigned mask = (unsigned)(group & 0xffff);
+
+		unsigned batch = (unsigned)((group & 0xffff0000ULL) >> (16 - simdv_width32_log2));
+		unsigned base = ((uint32_t)(group >> 32) << 16) | batch;
+
 		
 		while (mask) {
 			unsigned index = first_set_bit(mask);
