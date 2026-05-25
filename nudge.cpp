@@ -5327,9 +5327,15 @@ void apply_impulses(ContactConstraintData* data, BodyData bodies) {
 		
 		simdv_float a_velocity_x, a_velocity_y, a_velocity_z, a_mass_inverse;
 		simdv_float a_angular_velocity_x, a_angular_velocity_y, a_angular_velocity_z, a_angular_velocity_w;
+		#if NUDGE_SIMDV_WIDTH == 512
+		load16<sizeof(bodies.momentum[0])>((const float*)bodies.momentum, constraint.a,
+									   a_velocity_x, a_velocity_y, a_velocity_z, a_mass_inverse,
+									   a_angular_velocity_x, a_angular_velocity_y, a_angular_velocity_z, a_angular_velocity_w);
+	#else
 		load8<sizeof(bodies.momentum[0])>((const float*)bodies.momentum, constraint.a,
-										  a_velocity_x, a_velocity_y, a_velocity_z, a_mass_inverse,
-										  a_angular_velocity_x, a_angular_velocity_y, a_angular_velocity_z, a_angular_velocity_w);
+									  a_velocity_x, a_velocity_y, a_velocity_z, a_mass_inverse,
+									  a_angular_velocity_x, a_angular_velocity_y, a_angular_velocity_z, a_angular_velocity_w);
+	#endif
 		
 		simdv_float pa_z = simd_float::loadv(constraint.pa_z);
 		simdv_float pa_x = simd_float::loadv(constraint.pa_x);
@@ -5341,9 +5347,15 @@ void apply_impulses(ContactConstraintData* data, BodyData bodies) {
 		
 		simdv_float b_velocity_x, b_velocity_y, b_velocity_z, b_mass_inverse;
 		simdv_float b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w;
+		#if NUDGE_SIMDV_WIDTH == 512
+		load16<sizeof(bodies.momentum[0])>((const float*)bodies.momentum, constraint.b,
+									   b_velocity_x, b_velocity_y, b_velocity_z, b_mass_inverse,
+									   b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w);
+	#else
 		load8<sizeof(bodies.momentum[0])>((const float*)bodies.momentum, constraint.b,
-										  b_velocity_x, b_velocity_y, b_velocity_z, b_mass_inverse,
-										  b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w);
+									  b_velocity_x, b_velocity_y, b_velocity_z, b_mass_inverse,
+									  b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w);
+	#endif
 		
 		simdv_float pb_z = simd_float::loadv(constraint.pb_z);
 		simdv_float pb_x = simd_float::loadv(constraint.pb_x);
