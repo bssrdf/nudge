@@ -4810,6 +4810,8 @@ struct ContactConstraintData {
 ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, ContactData contacts, BodyData bodies, ContactImpulseData* contact_impulses, Arena* memory) {
 	// TODO: We should investigate better evaluation order for contacts.
 	uint32_t* contact_order = contact_impulses->sorted_contacts;
+
+	printf("enter setup_contact_constraints\n");
 	
 	ContactConstraintData* data = allocate_struct<ContactConstraintData>(memory, 64);
 	data->contact_count = contacts.count;
@@ -4899,14 +4901,18 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 #elif NUDGE_SIMDV_WIDTH == 512
 			__m512i a512 = _mm512_set1_epi16(ca);
 			__m512i b512 = _mm512_set1_epi16(cb);
+			
+			__m512i scheduled_a_b;
+			
 			unsigned j = 0;
 			for (;; ++j) {
-				__m512i scheduled_a_b = _mm512_load_si512((const __m512i*)vacant_pairs[j].ab);
+				scheduled_a_b = _mm512_load_si512((const __m512i*)vacant_pairs[j].ab);
 				unsigned mask = _mm512_cmpeq_epi16_mask(a512, scheduled_a_b) | _mm512_cmpeq_epi16_mask(b512, scheduled_a_b);
 				if (mask == 0)
 					break;
 			}
-			unsigned lane = first_set_bit(_mm512_cmpeq_epi32_mask(_mm512_load_si512((const __m512i*)vacant_pairs[j].ab), invalid_index));
+			
+			unsigned lane = first_set_bit(_mm512_cmpeq_epi32_mask(scheduled_a_b, invalid_index));
 #else
 			__m128i a = _mm_set1_epi16(ca);
 			__m128i b = _mm_set1_epi16(cb);
@@ -5170,6 +5176,13 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 #if NUDGE_SIMDV_WIDTH == 256
 		constraints[i].a[4] = a4; constraints[i].a[5] = a5; constraints[i].a[6] = a6; constraints[i].a[7] = a7;
 		constraints[i].b[4] = b4; constraints[i].b[5] = b5; constraints[i].b[6] = b6; constraints[i].b[7] = b7;
+#elif NUDGE_SIMDV_WIDTH == 512
+		constraints[i].a[4] = a4; constraints[i].a[5] = a5; constraints[i].a[6] = a6; constraints[i].a[7] = a7;
+		constraints[i].a[8] = a8; constraints[i].a[9] = a9; constraints[i].a[10] = a10; constraints[i].a[11] = a11;
+		constraints[i].a[12] = a12; constraints[i].a[13] = a13; constraints[i].a[14] = a14; constraints[i].a[15] = a15;
+		constraints[i].b[4] = b4; constraints[i].b[5] = b5; constraints[i].b[6] = b6; constraints[i].b[7] = b7;
+		constraints[i].b[8] = b8; constraints[i].b[9] = b9; constraints[i].b[10] = b10; constraints[i].b[11] = b11;
+		constraints[i].b[12] = b12; constraints[i].b[13] = b13; constraints[i].b[14] = b14; constraints[i].b[15] = b15;
 #endif
 		
 		simd_float::storev(constraints[i].n_x, normal_x);
@@ -5299,6 +5312,7 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 	
 	data->constraint_batches = contact_slot_count;
 	
+	// printf("Constraint batches: %u\n", data->constraint_batches);
 	return data;
 }
 
