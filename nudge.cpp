@@ -3430,22 +3430,22 @@ NUDGE_FORCEINLINE static void store16(float* data, const T* indices,
 	simd8_float b4 = simd::extract_high(d4), b5 = simd::extract_high(d5), b6 = simd::extract_high(d6), b7 = simd::extract_high(d7);
 
 	// Reconstruct 16 objects (8 floats each) by concatenating 4-float chunks
-	simd8_float o0 = _mm256_permute2x128_ps(a0, b0, 0x21);
-	simd8_float o1 = _mm256_permute2x128_ps(a1, b1, 0x21);
-	simd8_float o2 = _mm256_permute2x128_ps(a2, b2, 0x21);
-	simd8_float o3 = _mm256_permute2x128_ps(a3, b3, 0x21);
-	simd8_float o4 = _mm256_permute2x128_ps(a4, b4, 0x21);
-	simd8_float o5 = _mm256_permute2x128_ps(a5, b5, 0x21);
-	simd8_float o6 = _mm256_permute2x128_ps(a6, b6, 0x21);
-	simd8_float o7 = _mm256_permute2x128_ps(a7, b7, 0x21);
-	simd8_float o8 = _mm256_permute2x128_ps(a0, b0, 0x23);
-	simd8_float o9 = _mm256_permute2x128_ps(a1, b1, 0x23);
-	simd8_float o10 = _mm256_permute2x128_ps(a2, b2, 0x23);
-	simd8_float o11 = _mm256_permute2x128_ps(a3, b3, 0x23);
-	simd8_float o12 = _mm256_permute2x128_ps(a4, b4, 0x23);
-	simd8_float o13 = _mm256_permute2x128_ps(a5, b5, 0x23);
-	simd8_float o14 = _mm256_permute2x128_ps(a6, b6, 0x23);
-	simd8_float o15 = _mm256_permute2x128_ps(a7, b7, 0x23);
+	simd8_float o0 = simd256::permute128<1, 2>(a0, b0);
+	simd8_float o1 = simd256::permute128<1, 2>(a1, b1);
+	simd8_float o2 = simd256::permute128<1, 2>(a2, b2);
+	simd8_float o3 = simd256::permute128<1, 2>(a3, b3);
+	simd8_float o4 = simd256::permute128<1, 2>(a4, b4);
+	simd8_float o5 = simd256::permute128<1, 2>(a5, b5);
+	simd8_float o6 = simd256::permute128<1, 2>(a6, b6);
+	simd8_float o7 = simd256::permute128<1, 2>(a7, b7);
+	simd8_float o8 = simd256::permute128<3, 2>(a0, b0);
+	simd8_float o9 = simd256::permute128<3, 2>(a1, b1);
+	simd8_float o10 = simd256::permute128<3, 2>(a2, b2);
+	simd8_float o11 = simd256::permute128<3, 2>(a3, b3);
+	simd8_float o12 = simd256::permute128<3, 2>(a4, b4);
+	simd8_float o13 = simd256::permute128<3, 2>(a5, b5);
+	simd8_float o14 = simd256::permute128<3, 2>(a6, b6);
+	simd8_float o15 = simd256::permute128<3, 2>(a7, b7);
 
 	unsigned i0  = indices[0*index_stride];
 	unsigned i1  = indices[1*index_stride];
@@ -5546,11 +5546,15 @@ void apply_impulses(ContactConstraintData* data, BodyData bodies) {
 		a_angular_velocity_z = simd_float::madd(va_z, friction_impulse_y, a_angular_velocity_z);
 		
 		a_angular_velocity_w = simd_float::zerov(); // Reduces register pressure.
-		
+		#if NUDGE_SIMDV_WIDTH == 512
+		store16<sizeof(bodies.momentum[0])>((float*)bodies.momentum, constraint.a,
+									    a_velocity_x, a_velocity_y, a_velocity_z, a_mass_inverse,
+									    a_angular_velocity_x, a_angular_velocity_y, a_angular_velocity_z, a_angular_velocity_w);
+	#else
 		store8<sizeof(bodies.momentum[0])>((float*)bodies.momentum, constraint.a,
-										   a_velocity_x, a_velocity_y, a_velocity_z, a_mass_inverse,
-										   a_angular_velocity_x, a_angular_velocity_y, a_angular_velocity_z, a_angular_velocity_w);
-		
+									   a_velocity_x, a_velocity_y, a_velocity_z, a_mass_inverse,
+									   a_angular_velocity_x, a_angular_velocity_y, a_angular_velocity_z, a_angular_velocity_w);
+	#endif
 		b_velocity_x = simd_float::madd(linear_impulse_x, b_mass_inverse, b_velocity_x);
 		b_velocity_y = simd_float::madd(linear_impulse_y, b_mass_inverse, b_velocity_y);
 		b_velocity_z = simd_float::madd(linear_impulse_z, b_mass_inverse, b_velocity_z);
@@ -5573,9 +5577,15 @@ void apply_impulses(ContactConstraintData* data, BodyData bodies) {
 		
 		b_angular_velocity_w = simd_float::zerov(); // Reduces register pressure.
 		
+		#if NUDGE_SIMDV_WIDTH == 512
+		store16<sizeof(bodies.momentum[0])>((float*)bodies.momentum, constraint.b,
+									    b_velocity_x, b_velocity_y, b_velocity_z, b_mass_inverse,
+									    b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w);
+	#else
 		store8<sizeof(bodies.momentum[0])>((float*)bodies.momentum, constraint.b,
-										   b_velocity_x, b_velocity_y, b_velocity_z, b_mass_inverse,
-										   b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w);
+									   b_velocity_x, b_velocity_y, b_velocity_z, b_mass_inverse,
+									   b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w);
+	#endif
 	}
 }
 
