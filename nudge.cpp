@@ -3391,44 +3391,7 @@ NUDGE_FORCEINLINE static void store8(float* data, const T* indices,
 	simd_float::store8(data + i5*stride_in_floats, t5);
 	simd_float::store8(data + i6*stride_in_floats, t6);
 	simd_float::store8(data + i7*stride_in_floats, t7);
-#elif NUDGE_SIMDV_WIDTH == 512
-	simd4_float a0=simd::extract_low(simd::extract_low(d0)),a1=simd::extract_low(simd::extract_low(d1)),a2=simd::extract_low(simd::extract_low(d2)),a3=simd::extract_low(simd::extract_low(d3));
-	simd4_float a4=simd::extract_low(simd::extract_low(d4)),a5=simd::extract_low(simd::extract_low(d5)),a6=simd::extract_low(simd::extract_low(d6)),a7=simd::extract_low(simd::extract_low(d7));
-	simd128::transpose32(a0,a1,a2,a3); simd128::transpose32(a4,a5,a6,a7);
-	simd4_float b0=simd::extract_low(simd::extract_high(d0)),b1=simd::extract_low(simd::extract_high(d1)),b2=simd::extract_low(simd::extract_high(d2)),b3=simd::extract_low(simd::extract_high(d3));
-	simd4_float b4=simd::extract_low(simd::extract_high(d4)),b5=simd::extract_low(simd::extract_high(d5)),b6=simd::extract_low(simd::extract_high(d6)),b7=simd::extract_low(simd::extract_high(d7));
-	simd128::transpose32(b0,b1,b2,b3); simd128::transpose32(b4,b5,b6,b7);
-	simd4_float c0=simd::extract_high(simd::extract_low(d0)),c1=simd::extract_high(simd::extract_low(d1)),c2=simd::extract_high(simd::extract_low(d2)),c3=simd::extract_high(simd::extract_low(d3));
-	simd4_float c4=simd::extract_high(simd::extract_low(d4)),c5=simd::extract_high(simd::extract_low(d5)),c6=simd::extract_high(simd::extract_low(d6)),c7=simd::extract_high(simd::extract_low(d7));
-	simd128::transpose32(c0,c1,c2,c3); simd128::transpose32(c4,c5,c6,c7);
-	simd4_float dd0=simd::extract_high(simd::extract_high(d0)),dd1=simd::extract_high(simd::extract_high(d1)),dd2=simd::extract_high(simd::extract_high(d2)),dd3=simd::extract_high(simd::extract_high(d3));
-	simd4_float dd4=simd::extract_high(simd::extract_high(d4)),dd5=simd::extract_high(simd::extract_high(d5)),dd6=simd::extract_high(simd::extract_high(d6)),dd7=simd::extract_high(simd::extract_high(d7));
-	simd128::transpose32(dd0,dd1,dd2,dd3); simd128::transpose32(dd4,dd5,dd6,dd7);
-	simdv_float t0=simd::concat(simd::concat(a0,b0),simd::concat(c0,dd0));
-	simdv_float t1=simd::concat(simd::concat(a1,b1),simd::concat(c1,dd1));
-	simdv_float t2=simd::concat(simd::concat(a2,b2),simd::concat(c2,dd2));
-	simdv_float t3=simd::concat(simd::concat(a3,b3),simd::concat(c3,dd3));
-	simdv_float t4=simd::concat(simd::concat(a4,b4),simd::concat(c4,dd4));
-	simdv_float t5=simd::concat(simd::concat(a5,b5),simd::concat(c5,dd5));
-	simdv_float t6=simd::concat(simd::concat(a6,b6),simd::concat(c6,dd6));
-	simdv_float t7=simd::concat(simd::concat(a7,b7),simd::concat(c7,dd7));
-	unsigned i0 = indices[0*index_stride];
-	unsigned i1 = indices[1*index_stride];
-	unsigned i2 = indices[2*index_stride];
-	unsigned i3 = indices[3*index_stride];
-	simd_float::storeu16(data + i0*stride_in_floats, t0);
-	simd_float::storeu16(data + i1*stride_in_floats, t1);
-	simd_float::storeu16(data + i2*stride_in_floats, t2);
-	simd_float::storeu16(data + i3*stride_in_floats, t3);
-	unsigned i4 = indices[4*index_stride];
-	unsigned i5 = indices[5*index_stride];
-	unsigned i6 = indices[6*index_stride];
-	unsigned i7 = indices[7*index_stride];
-	simd_float::storeu16(data + i4*stride_in_floats, t4);
-	simd_float::storeu16(data + i5*stride_in_floats, t5);
-	simd_float::storeu16(data + i6*stride_in_floats, t6);
-	simd_float::storeu16(data + i7*stride_in_floats, t7);
-#else
+#elif NUDGE_SIMDV_WIDTH == 128
 	simd128::transpose32(d0, d1, d2, d3);
 	simd128::transpose32(d4, d5, d6, d7);
 	
@@ -3446,6 +3409,77 @@ NUDGE_FORCEINLINE static void store8(float* data, const T* indices,
 	simd_float::store4(data + i1*stride_in_floats + 4, d5);
 	simd_float::store4(data + i2*stride_in_floats + 4, d6);
 	simd_float::store4(data + i3*stride_in_floats + 4, d7);
+#endif
+}
+
+template<unsigned data_stride, unsigned index_stride = 1, class T>
+NUDGE_FORCEINLINE static void store16(float* data, const T* indices,
+									  simdv_float d0, simdv_float d1, simdv_float d2, simdv_float d3,
+									  simdv_float d4, simdv_float d5, simdv_float d6, simdv_float d7) {
+	static const unsigned stride_in_floats = data_stride/sizeof(float);
+
+#if NUDGE_SIMDV_WIDTH == 512
+	// Un-transpose (inverse of load16 step 3)
+	simd512::transpose32(d0, d1, d2, d3);
+	simd512::transpose32(d4, d5, d6, d7);
+
+	// Extract low/high 8-float halves (inverse of load16 step 2)
+	simd8_float a0 = simd::extract_low(d0), a1 = simd::extract_low(d1), a2 = simd::extract_low(d2), a3 = simd::extract_low(d3);
+	simd8_float a4 = simd::extract_low(d4), a5 = simd::extract_low(d5), a6 = simd::extract_low(d6), a7 = simd::extract_low(d7);
+	simd8_float b0 = simd::extract_high(d0), b1 = simd::extract_high(d1), b2 = simd::extract_high(d2), b3 = simd::extract_high(d3);
+	simd8_float b4 = simd::extract_high(d4), b5 = simd::extract_high(d5), b6 = simd::extract_high(d6), b7 = simd::extract_high(d7);
+
+	// Reconstruct 16 objects (8 floats each) by concatenating 4-float chunks
+	simd8_float o0 = _mm256_permute2x128_ps(a0, b0, 0x21);
+	simd8_float o1 = _mm256_permute2x128_ps(a1, b1, 0x21);
+	simd8_float o2 = _mm256_permute2x128_ps(a2, b2, 0x21);
+	simd8_float o3 = _mm256_permute2x128_ps(a3, b3, 0x21);
+	simd8_float o4 = _mm256_permute2x128_ps(a4, b4, 0x21);
+	simd8_float o5 = _mm256_permute2x128_ps(a5, b5, 0x21);
+	simd8_float o6 = _mm256_permute2x128_ps(a6, b6, 0x21);
+	simd8_float o7 = _mm256_permute2x128_ps(a7, b7, 0x21);
+	simd8_float o8 = _mm256_permute2x128_ps(a0, b0, 0x23);
+	simd8_float o9 = _mm256_permute2x128_ps(a1, b1, 0x23);
+	simd8_float o10 = _mm256_permute2x128_ps(a2, b2, 0x23);
+	simd8_float o11 = _mm256_permute2x128_ps(a3, b3, 0x23);
+	simd8_float o12 = _mm256_permute2x128_ps(a4, b4, 0x23);
+	simd8_float o13 = _mm256_permute2x128_ps(a5, b5, 0x23);
+	simd8_float o14 = _mm256_permute2x128_ps(a6, b6, 0x23);
+	simd8_float o15 = _mm256_permute2x128_ps(a7, b7, 0x23);
+
+	unsigned i0  = indices[0*index_stride];
+	unsigned i1  = indices[1*index_stride];
+	unsigned i2  = indices[2*index_stride];
+	unsigned i3  = indices[3*index_stride];
+	unsigned i4  = indices[4*index_stride];
+	unsigned i5  = indices[5*index_stride];
+	unsigned i6  = indices[6*index_stride];
+	unsigned i7  = indices[7*index_stride];
+	unsigned i8  = indices[8*index_stride];
+	unsigned i9  = indices[9*index_stride];
+	unsigned i10 = indices[10*index_stride];
+	unsigned i11 = indices[11*index_stride];
+	unsigned i12 = indices[12*index_stride];
+	unsigned i13 = indices[13*index_stride];
+	unsigned i14 = indices[14*index_stride];
+	unsigned i15 = indices[15*index_stride];
+
+	simd_float::storeu8(data + i0*stride_in_floats,  o0);
+	simd_float::storeu8(data + i1*stride_in_floats,  o1);
+	simd_float::storeu8(data + i2*stride_in_floats,  o2);
+	simd_float::storeu8(data + i3*stride_in_floats,  o3);
+	simd_float::storeu8(data + i4*stride_in_floats,  o4);
+	simd_float::storeu8(data + i5*stride_in_floats,  o5);
+	simd_float::storeu8(data + i6*stride_in_floats,  o6);
+	simd_float::storeu8(data + i7*stride_in_floats,  o7);
+	simd_float::storeu8(data + i8*stride_in_floats,  o8);
+	simd_float::storeu8(data + i9*stride_in_floats,  o9);
+	simd_float::storeu8(data + i10*stride_in_floats, o10);
+	simd_float::storeu8(data + i11*stride_in_floats, o11);
+	simd_float::storeu8(data + i12*stride_in_floats, o12);
+	simd_float::storeu8(data + i13*stride_in_floats, o13);
+	simd_float::storeu8(data + i14*stride_in_floats, o14);
+	simd_float::storeu8(data + i15*stride_in_floats, o15);
 #endif
 }
 
@@ -5327,15 +5361,15 @@ void apply_impulses(ContactConstraintData* data, BodyData bodies) {
 		
 		simdv_float a_velocity_x, a_velocity_y, a_velocity_z, a_mass_inverse;
 		simdv_float a_angular_velocity_x, a_angular_velocity_y, a_angular_velocity_z, a_angular_velocity_w;
-		#if NUDGE_SIMDV_WIDTH == 512
+#if NUDGE_SIMDV_WIDTH == 512
 		load16<sizeof(bodies.momentum[0])>((const float*)bodies.momentum, constraint.a,
 									   a_velocity_x, a_velocity_y, a_velocity_z, a_mass_inverse,
 									   a_angular_velocity_x, a_angular_velocity_y, a_angular_velocity_z, a_angular_velocity_w);
-	#else
+#else
 		load8<sizeof(bodies.momentum[0])>((const float*)bodies.momentum, constraint.a,
 									  a_velocity_x, a_velocity_y, a_velocity_z, a_mass_inverse,
 									  a_angular_velocity_x, a_angular_velocity_y, a_angular_velocity_z, a_angular_velocity_w);
-	#endif
+#endif
 		
 		simdv_float pa_z = simd_float::loadv(constraint.pa_z);
 		simdv_float pa_x = simd_float::loadv(constraint.pa_x);
@@ -5347,15 +5381,15 @@ void apply_impulses(ContactConstraintData* data, BodyData bodies) {
 		
 		simdv_float b_velocity_x, b_velocity_y, b_velocity_z, b_mass_inverse;
 		simdv_float b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w;
-		#if NUDGE_SIMDV_WIDTH == 512
+#if NUDGE_SIMDV_WIDTH == 512
 		load16<sizeof(bodies.momentum[0])>((const float*)bodies.momentum, constraint.b,
 									   b_velocity_x, b_velocity_y, b_velocity_z, b_mass_inverse,
 									   b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w);
-	#else
+#else
 		load8<sizeof(bodies.momentum[0])>((const float*)bodies.momentum, constraint.b,
 									  b_velocity_x, b_velocity_y, b_velocity_z, b_mass_inverse,
 									  b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w);
-	#endif
+#endif
 		
 		simdv_float pb_z = simd_float::loadv(constraint.pb_z);
 		simdv_float pb_x = simd_float::loadv(constraint.pb_x);
