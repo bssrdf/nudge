@@ -846,6 +846,7 @@ namespace simd512 {
 	// 	return _mm256_castsi256_ps(_mm256_permute2x128_si256(_mm256_castps_si256(x), _mm256_castps_si256(y), i0 | (i1 << 4)));
 	// }
 
+
 	 // Extract low or high 128-bit lane from a 256-bit vector
 	template<bool High>
 	NUDGE_FORCEINLINE __m128 extract_lane_ps(__m256 v) {
@@ -939,9 +940,11 @@ namespace simd_float {
 		// return _mm512_mask_blend_ps(_mm512_cmplt_ps_mask(y, x), y, x);
 	}
 
-	NUDGE_FORCEINLINE simd16_float cmp_lt(simd16_float x, simd16_float y) { return _mm512_mask_blend_ps(_mm512_cmplt_ps_mask(x, y), y, x); }
-	NUDGE_FORCEINLINE simd16_float cmp_eq(simd16_float x, simd16_float y) { return _mm512_mask_blend_ps(_mm512_cmpeq_ps_mask(x, y), y, x); }
-	NUDGE_FORCEINLINE simd16_float cmp_neq(simd16_float x, simd16_float y) { return _mm512_mask_blend_ps(~_mm512_cmpeq_ps_mask(x, y), y, x); }
+	NUDGE_FORCEINLINE simd16_float cmp_lt(simd16_float x, simd16_float y) { return _mm512_castsi512_ps(_mm512_maskz_set1_epi32(_mm512_cmplt_ps_mask(x, y), -1)); }
+	NUDGE_FORCEINLINE simd16_float cmp_eq(simd16_float x, simd16_float y) { return _mm512_castsi512_ps(_mm512_maskz_set1_epi32(_mm512_cmpeq_ps_mask(x, y), -1)); }
+	NUDGE_FORCEINLINE simd16_float cmp_neq(simd16_float x, simd16_float y) { return _mm512_castsi512_ps(_mm512_maskz_set1_epi32(~_mm512_cmpeq_ps_mask(x, y), -1)); }
+	NUDGE_FORCEINLINE simd16_float cmp_ge(simd16_float x, simd16_float y) { return _mm512_castsi512_ps(_mm512_maskz_set1_epi32(~_mm512_cmplt_ps_mask(x, y), -1)); }
+	NUDGE_FORCEINLINE simd16_float cmp_le(simd16_float x, simd16_float y) { return _mm512_castsi512_ps(_mm512_maskz_set1_epi32(~_mm512_cmpgt_ps_mask(x, y), -1)); }
 	NUDGE_FORCEINLINE simd16_float recip(simd16_float x) { return _mm512_rcp14_ps(x); }
 	NUDGE_FORCEINLINE simd16_float abs(simd16_float x) { return _mm512_and_ps(x, _mm512_castsi512_ps(_mm512_set1_epi32(0x7FFFFFFF))); }
 	NUDGE_FORCEINLINE simd16_int32 toint(simd16_float x) { return _mm512_cvttps_epi32(x); }
@@ -1131,6 +1134,7 @@ namespace simd_int32 {
 	NUDGE_FORCEINLINE simdv_int32 loaduv(const int32_t* p) { return loadu16(p); }
 	NUDGE_FORCEINLINE void storev(int32_t* p, simdv_int32 x) { store16(p, x); }
 	NUDGE_FORCEINLINE void storeuv(int32_t* p, simdv_int32 x) { storeu16(p, x); }
+	NUDGE_FORCEINLINE simdv_int32 lowest32(simdv_int32 x) { return _mm512_broadcastd_epi32(_mm512_castsi512_si128(x)); }
 }
 #endif
 
@@ -4845,7 +4849,7 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 	// TODO: We should investigate better evaluation order for contacts.
 	uint32_t* contact_order = contact_impulses->sorted_contacts;
 
-	printf("enter setup_contact_constraints\n");
+	// printf("enter setup_contact_constraints\n");
 	
 	ContactConstraintData* data = allocate_struct<ContactConstraintData>(memory, 64);
 	data->contact_count = contacts.count;
@@ -4999,36 +5003,35 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 			else {
 				continue;
 			}
-			
+
 			// Store count and maintain padding.
 			bucket_vacancy_count[bucket] = vacancy_count;
 			simd_int32::storev((int32_t*)vacant_pairs[vacancy_count].ab, invalid_index);
 		}
-		
+
 		for (unsigned i = 0; i < bucket_count; ++i) {
 			ContactPairV* vacant_pairs = vacant_pair_buckets[i];
 			ContactSlotV* vacant_slots = vacant_slot_buckets[i];
 			unsigned vacancy_count = bucket_vacancy_count[i];
-			
+
 			// Replace any unset indices with the first one, which is always valid.
 			// This is safe because the slots will just overwrite each other.
 			for (unsigned i = 0; i < vacancy_count; ++i) {
 				simdv_int32 ab = simd_int32::loadv((int32_t*)vacant_pairs[i].ab);
 				simdv_int32 indices = simd_int32::loadv((const int32_t*)vacant_slots[i].indices);
-				
+
 				simdv_int32 mask = simd_int32::cmp_eq(ab, invalid_index);
-#if NUDGE_SIMDV_WIDTH >= 256
-				simdv_int32 first_index = simd_int32::makev(simd_int32::extract_first_int32(indices));
+#if NUDGE_SIMDV_WIDTH == 512
+				simdv_int32 first_index = simd_int32::lowest32(indices);
 #else
 				simdv_int32 first_index = simd128::shuffle32<0, 0, 0, 0>(indices);
-				
 #if NUDGE_SIMDV_WIDTH == 256
 				first_index = simd256::shuffle128<0,0>(first_index);
 #endif
 #endif
-				
+
 				indices = simd::blendv32(indices, first_index, mask);
-				
+
 				simd_int32::storev((int32_t*)contact_slots[contact_slot_count++].indices, indices);
 			}
 		}
@@ -5051,9 +5054,15 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 		
 		simdv_float position_x, position_y, position_z, penetration;
 		simdv_float normal_x, normal_y, normal_z, friction;
+#if NUDGE_SIMDV_WIDTH == 512
+		load16<sizeof(contacts.data[0])>((const float*)contacts.data, slot.indices,
+										position_x, position_y, position_z, penetration,
+										normal_x, normal_y, normal_z, friction);
+#else
 		load8<sizeof(contacts.data[0])>((const float*)contacts.data, slot.indices,
 										position_x, position_y, position_z, penetration,
 										normal_x, normal_y, normal_z, friction);
+#endif
 		
 		NUDGE_SIMDV_ALIGNED uint16_t ab_array[simdv_width32*2];
 		
