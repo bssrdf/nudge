@@ -3216,29 +3216,35 @@ NUDGE_FORCEINLINE static void load4(const float* data, const T* indices,
 	unsigned i4 = indices[4*index_stride]; unsigned i5 = indices[5*index_stride]; unsigned i6 = indices[6*index_stride]; unsigned i7 = indices[7*index_stride];
 	unsigned i8 = indices[8*index_stride]; unsigned i9 = indices[9*index_stride]; unsigned i10 = indices[10*index_stride]; unsigned i11 = indices[11*index_stride];
 	unsigned i12 = indices[12*index_stride]; unsigned i13 = indices[13*index_stride]; unsigned i14 = indices[14*index_stride]; unsigned i15 = indices[15*index_stride];
-	simd4_float t0 = simd_float::load4(data + i0*stride_in_floats);
-	simd4_float t1 = simd_float::load4(data + i4*stride_in_floats);
-	simd4_float t2 = simd_float::load4(data + i8*stride_in_floats);
-	simd4_float t3 = simd_float::load4(data + i12*stride_in_floats);
+	// Load indices 0..3, transpose -> r0=[x0..x3], r1=[y0..y3], r2=[z0..z3], r3=[w0..w3]
+	simd4_float r0 = simd_float::load4(data + i0*stride_in_floats);
+	simd4_float r1 = simd_float::load4(data + i1*stride_in_floats);
+	simd4_float r2 = simd_float::load4(data + i2*stride_in_floats);
+	simd4_float r3 = simd_float::load4(data + i3*stride_in_floats);
+	simd128::transpose32(r0, r1, r2, r3);
+	// Load indices 4..7, transpose -> r4=[x4..x7], r5=[y4..y7], r6=[z4..z7], r7=[w4..w7]
+	simd4_float r4 = simd_float::load4(data + i4*stride_in_floats);
+	simd4_float r5 = simd_float::load4(data + i5*stride_in_floats);
+	simd4_float r6 = simd_float::load4(data + i6*stride_in_floats);
+	simd4_float r7 = simd_float::load4(data + i7*stride_in_floats);
+	simd128::transpose32(r4, r5, r6, r7);
+	// Load indices 8..11, transpose -> t0=[x8..x11], t1=[y8..y11], t2=[z8..z11], t3=[w8..w11]
+	simd4_float t0 = simd_float::load4(data + i8*stride_in_floats);
+	simd4_float t1 = simd_float::load4(data + i9*stride_in_floats);
+	simd4_float t2 = simd_float::load4(data + i10*stride_in_floats);
+	simd4_float t3 = simd_float::load4(data + i11*stride_in_floats);
 	simd128::transpose32(t0, t1, t2, t3);
-	simd4_float t4 = simd_float::load4(data + i1*stride_in_floats);
-	simd4_float t5 = simd_float::load4(data + i5*stride_in_floats);
-	simd4_float t6 = simd_float::load4(data + i9*stride_in_floats);
-	simd4_float t7 = simd_float::load4(data + i13*stride_in_floats);
+	// Load indices 12..15, transpose -> t4=[x12..x15], t5=[y12..y15], t6=[z12..z15], t7=[w12..w15]
+	simd4_float t4 = simd_float::load4(data + i12*stride_in_floats);
+	simd4_float t5 = simd_float::load4(data + i13*stride_in_floats);
+	simd4_float t6 = simd_float::load4(data + i14*stride_in_floats);
+	simd4_float t7 = simd_float::load4(data + i15*stride_in_floats);
 	simd128::transpose32(t4, t5, t6, t7);
-	simd8_float r0 = simd::concat(t0, t4); simd8_float r1 = simd::concat(t1, t5); simd8_float r2 = simd::concat(t2, t6); simd8_float r3 = simd::concat(t3, t7);
-	simd4_float u0 = simd_float::load4(data + i2*stride_in_floats);
-	simd4_float u1 = simd_float::load4(data + i6*stride_in_floats);
-	simd4_float u2 = simd_float::load4(data + i10*stride_in_floats);
-	simd4_float u3 = simd_float::load4(data + i14*stride_in_floats);
-	simd128::transpose32(u0, u1, u2, u3);
-	simd4_float u4 = simd_float::load4(data + i3*stride_in_floats);
-	simd4_float u5 = simd_float::load4(data + i7*stride_in_floats);
-	simd4_float u6 = simd_float::load4(data + i11*stride_in_floats);
-	simd4_float u7 = simd_float::load4(data + i15*stride_in_floats);
-	simd128::transpose32(u4, u5, u6, u7);
-	simd8_float r4 = simd::concat(u0, u4); simd8_float r5 = simd::concat(u1, u5); simd8_float r6 = simd::concat(u2, u6); simd8_float r7 = simd::concat(u3, u7);
-	d0 = simd::concat(r0, r4); d1 = simd::concat(r1, r5); d2 = simd::concat(r2, r6); d3 = simd::concat(r3, r7);
+	// concat low-half [0..7] with high-half [8..15] -> [0,1,...,15]
+	d0 = simd::concat(simd::concat(r0, r4), simd::concat(t0, t4));
+	d1 = simd::concat(simd::concat(r1, r5), simd::concat(t1, t5));
+	d2 = simd::concat(simd::concat(r2, r6), simd::concat(t2, t6));
+	d3 = simd::concat(simd::concat(r3, r7), simd::concat(t3, t7));
 #else
 	unsigned i0 = indices[0*index_stride];
 	unsigned i1 = indices[1*index_stride];
