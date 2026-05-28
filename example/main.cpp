@@ -517,8 +517,11 @@ int main(int argc, const char* argv[]) {
 	_MM_SET_FLUSH_ZERO_MODE(_MM_FLUSH_ZERO_ON);
 	_MM_SET_DENORMALS_ZERO_MODE(_MM_DENORMALS_ZERO_ON);
 	
+
 	// Print information about instruction set.
-#ifdef __AVX2__
+#ifdef __AVX512F__
+	printf("Using 16-wide AVX\n");
+#elif defined(__AVX2__)
 	printf("Using 8-wide AVX\n");
 #else
 	printf("Using 4-wide SSE\n");
@@ -587,28 +590,35 @@ int main(int argc, const char* argv[]) {
 	}
 	
 	// Add boxes.
-	for (unsigned i = 0; i < 1024; ++i) {
-		float sx = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
-		float sy = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
-		float sz = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
+	// for (unsigned i = 0; i < 1024; ++i) {
+	for (unsigned i = 0; i < 64; ++i) {
+		float sx = 1.f;
+		float sy = 1.f;
+		float sz = 1.f;
+		// float sx = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
+		// float sy = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
+		// float sz = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
 		
 		unsigned body = add_box(8.0f*sx*sy*sz, sx, sy, sz);
 		
-		bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-		bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
-		bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+		// bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+		// bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
+		// bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+		bodies.transforms[body].position[0] += i/64.f * 10.0f - 5.0f;
+		bodies.transforms[body].position[1] += (i+10)/64.f * 300.0f;
+		bodies.transforms[body].position[2] += i/64.f * 10.0f - 5.0f;
 	}
 	
 	// Add spheres.
-	for (unsigned i = 0; i < 512; ++i) {
-		float s = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
+	// for (unsigned i = 0; i < 512; ++i) {
+	// 	float s = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
 		
-		unsigned body = add_sphere(4.18879f*s*s*s, s);
+	// 	unsigned body = add_sphere(4.18879f*s*s*s, s);
 		
-		bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-		bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
-		bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-	}
+	// 	bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+	// 	bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
+	// 	bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+	// }
 	
 	// Start GLUT.
 	glutInit(&argc, const_cast<char**>(argv));
