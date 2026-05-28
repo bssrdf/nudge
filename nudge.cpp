@@ -3457,22 +3457,40 @@ NUDGE_FORCEINLINE static void store16(float* data, const T* indices,
 	simd8_float b4 = simd::extract_high(d4), b5 = simd::extract_high(d5), b6 = simd::extract_high(d6), b7 = simd::extract_high(d7);
 
 	// Reconstruct 16 objects (8 floats each) by concatenating 4-float chunks
-	simd8_float o0 = simd256::permute128<1, 2>(a0, b0);
-	simd8_float o1 = simd256::permute128<1, 2>(a1, b1);
-	simd8_float o2 = simd256::permute128<1, 2>(a2, b2);
-	simd8_float o3 = simd256::permute128<1, 2>(a3, b3);
-	simd8_float o4 = simd256::permute128<1, 2>(a4, b4);
-	simd8_float o5 = simd256::permute128<1, 2>(a5, b5);
-	simd8_float o6 = simd256::permute128<1, 2>(a6, b6);
-	simd8_float o7 = simd256::permute128<1, 2>(a7, b7);
-	simd8_float o8 = simd256::permute128<3, 2>(a0, b0);
-	simd8_float o9 = simd256::permute128<3, 2>(a1, b1);
-	simd8_float o10 = simd256::permute128<3, 2>(a2, b2);
-	simd8_float o11 = simd256::permute128<3, 2>(a3, b3);
-	simd8_float o12 = simd256::permute128<3, 2>(a4, b4);
-	simd8_float o13 = simd256::permute128<3, 2>(a5, b5);
-	simd8_float o14 = simd256::permute128<3, 2>(a6, b6);
-	simd8_float o15 = simd256::permute128<3, 2>(a7, b7);
+	// simd8_float o0 = simd256::permute128<1, 2>(a0, b0);
+	// simd8_float o1 = simd256::permute128<1, 2>(a1, b1);
+	// simd8_float o2 = simd256::permute128<1, 2>(a2, b2);
+	// simd8_float o3 = simd256::permute128<1, 2>(a3, b3);
+	// simd8_float o4 = simd256::permute128<1, 2>(a4, b4);
+	// simd8_float o5 = simd256::permute128<1, 2>(a5, b5);
+	// simd8_float o6 = simd256::permute128<1, 2>(a6, b6);
+	// simd8_float o7 = simd256::permute128<1, 2>(a7, b7);
+	// simd8_float o8 = simd256::permute128<3, 2>(a0, b0);
+	// simd8_float o9 = simd256::permute128<3, 2>(a1, b1);
+	// simd8_float o10 = simd256::permute128<3, 2>(a2, b2);
+	// simd8_float o11 = simd256::permute128<3, 2>(a3, b3);
+	// simd8_float o12 = simd256::permute128<3, 2>(a4, b4);
+	// simd8_float o13 = simd256::permute128<3, 2>(a5, b5);
+	// simd8_float o14 = simd256::permute128<3, 2>(a6, b6);
+	// simd8_float o15 = simd256::permute128<3, 2>(a7, b7);
+
+	simd8_float o0 = simd256::permute128<0, 2>(a0, a4);
+	simd8_float o1 = simd256::permute128<0, 2>(a1, a5);
+	simd8_float o2 = simd256::permute128<0, 2>(a2, a6);
+	simd8_float o3 = simd256::permute128<0, 2>(a3, a7);
+    simd8_float o4 = simd256::permute128<1, 3>(a0, a4);
+	simd8_float o5 = simd256::permute128<1, 3>(a1, a5);
+	simd8_float o6 = simd256::permute128<1, 3>(a2, a6);
+	simd8_float o7 = simd256::permute128<1, 3>(a3, a7);
+	simd8_float o8 = simd256::permute128<0, 2>(b0, b4);
+	simd8_float o9 = simd256::permute128<0, 2>(b1, b5);
+	simd8_float o10 = simd256::permute128<0, 2>(b2, b6);
+	simd8_float o11 = simd256::permute128<0, 2>(b3, b7);
+	simd8_float o12 = simd256::permute128<1, 3>(b0, b4);
+	simd8_float o13 = simd256::permute128<1, 3>(b1, b5);
+	simd8_float o14 = simd256::permute128<1, 3>(b2, b6);
+	simd8_float o15 = simd256::permute128<1, 3>(b3, b7);
+
 
 	unsigned i0  = indices[0*index_stride];
 	unsigned i1  = indices[1*index_stride];
