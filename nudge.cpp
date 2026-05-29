@@ -2384,15 +2384,7 @@ static unsigned box_box_collide(uint32_t* pairs, unsigned pair_count, BoxCollide
 #endif
 					
 					simdv_float penetration = penetration_offset - simd::bitwise_xor(z, z_sign);
-#if NUDGE_SIMDV_WIDTH == 512
-                    // printf("Penetrations: \n");
-                    // // print_m512(penetration_offset);
-					// // print_m512(z);
-					// // print_m512(z_sign);
-					// print_m512(x);
-					// print_m512(y);
-					// print_m512(plane);
-#endif
+
 					
 					z += penetration * simd::bitwise_xor(simd_float::makev(0.5f), z_sign);
 					
@@ -2401,13 +2393,6 @@ static unsigned box_box_collide(uint32_t* pairs, unsigned pair_count, BoxCollide
 					simd_float::storev(penetrations + i, penetration);
 					simd_float::storev(support + 32 + i, z);
 				}
-#if NUDGE_SIMDV_WIDTH == 512
-				// printf("Penetrations: ");
-				// for(int kk = 0; kk < 16; ++kk) {
-				// 	printf("%f, ", penetrations[kk]);
-				// }
-				// printf("\n");
-#endif
 
 				mask &= penetration_mask;
 				
@@ -3816,15 +3801,6 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		bounds[bounds_group].max_z[bounds_lane] = NAN;
 	}
 
-	// printf("minx: [");
-    // for(int i = 0; i < simdv_width32; ++i)
-	//    printf("%f, ", bounds[0].min_x[i]);
-	// printf("]\n");
-	// printf("maxx: [");
-    // for(int i = 0; i < simdv_width32; ++i)
-	//    printf("%f, ", bounds[0].max_x[i]);
-	// printf("]\n");
-	
 	// Pack each set of 8 consecutive AABBs into coarse AABBs.
 #if NUDGE_SIMDV_WIDTH <= 256
 	unsigned coarse_count = aligned_count >> 3;
@@ -3835,12 +3811,8 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	
 	unsigned coarse_bounds_count = aligned_coarse_count >> simdv_width32_log2;
 	AABBV* coarse_bounds = allocate_array<AABBV>(&temporary, coarse_bounds_count, simdv_alignment);
-    
-	// printf("AA aligned_count, coarse_count, aligned_coarse_count, coarse_bounds_count, bounds_count\n");
-	// printf("AA %u, %u, %u, %u, %u \n", aligned_count, coarse_count, aligned_coarse_count, coarse_bounds_count, bounds_count);
-	
+
 	for (unsigned i = 0; i < coarse_count; ++i) {
-		// unsigned start = i << ((3 > simdv_width32_log2) ? (3 - simdv_width32_log2) : 0);
 #if NUDGE_SIMDV_WIDTH <= 256
 		unsigned start = i << (3 - simdv_width32_log2);
 		unsigned offset0 = 0;
@@ -3890,17 +3862,10 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		simdv_float coarse_max_y = simd_float::load16(bounds[start].max_y);
 		simdv_float coarse_min_z = simd_float::load16(bounds[start].min_z);
 		simdv_float coarse_max_z = simd_float::load16(bounds[start].max_z);
-		// coarse_min_x  = _mm512_reduce_min_ps(coarse_min_x);
-		// coarse_max_x  = _mm512_reduce_max_ps(coarse_max_x);
-		// coarse_min_y  = _mm512_reduce_min_ps(coarse_min_y);
-		// coarse_max_y  = _mm512_reduce_max_ps(coarse_max_y);
-		// coarse_min_z  = _mm512_reduce_min_ps(coarse_min_z);
-		// coarse_max_z  = _mm512_reduce_max_ps(coarse_max_z);
 #endif
 		
 		unsigned bounds_group = i >> simdv_width32_log2;
 		unsigned bounds_lane = i & (simdv_width32-1);
-		// printf(" %u, %u, %u, %u \n", i, bounds_group, bounds_lane, start);
 		
 #if NUDGE_SIMDV_WIDTH == 512
         coarse_bounds[bounds_group].min_x[bounds_lane] = _mm512_reduce_min_ps(coarse_min_x);
@@ -3930,15 +3895,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		coarse_bounds[bounds_group].min_z[bounds_lane] = NAN;
 		coarse_bounds[bounds_group].max_z[bounds_lane] = NAN;
 	}
-    // printf("minx: [");
-    // for(int i = 0; i < simdv_width32; ++i)
-	//    printf("%f, ", coarse_bounds[0].min_x[i]);
-	// printf("]\n");
-	// printf("maxx: [");
-    // for(int i = 0; i < simdv_width32; ++i)
-	//    printf("%f, ", coarse_bounds[0].max_x[i]);
-	// printf("]\n");
-	
+
 	// Test all coarse groups against each other and generate pairs with potential overlap.
 	// uint32_t* coarse_groups = reserve_array<uint32_t>(&temporary, coarse_count*coarse_count, 32);
 	uint64_t* coarse_groups = reserve_array<uint64_t>(&temporary, coarse_count*coarse_count, 64);
@@ -3982,13 +3939,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 			// coarse_groups[coarse_group_count] = mask | ij_bits;
 			coarse_groups[coarse_group_count] = (uint64_t)(mask) | ij_bits;
 			coarse_group_count += mask != 0;
-			// printf("i: %u, j: %u, mask: %u\n", i, j, mask);
-			// print_m512(mask_f);
-			// print_m512(inside_x);
-			// print_m512(inside_y);
-			// print_m512(inside_z);
 
-			// ij_bits += 1 << 8;
 			ij_bits += 1 << 16;
 		}
 
@@ -4026,8 +3977,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	// uint32_t* groups = reserve_array<uint32_t>(&temporary, coarse_pair_count*16, 32);
 	uint64_t* groups = reserve_array<uint64_t>(&temporary, coarse_pair_count*16, 64);
 	unsigned group_count = 0;
-	// printf("Coarse group count: %u Coarse pairs count: %u\n", coarse_group_count, coarse_pair_count);
-	
+
 #if NUDGE_SIMDV_WIDTH == 512
 	// Each coarse cell has 8 sub-colliders. bounds[g] holds 16 colliders (= 2 coarse cells).
 	// Even coarse cell c -> bounds[c/2] lanes 0-7, odd coarse cell c -> bounds[(c-1)/2] lanes 8-15.
@@ -4080,22 +4030,11 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 			unsigned mask0 = mask;
 
 			// Mask out collisions already handled.
-			// mask &= lower_lane_mask >> 8;
 			mask &= lower_lane_mask >> 16;
 			lower_lane_mask <<= 1;
 
 			groups[group_count] = (uint64_t)mask | ij_bits;
 			group_count += mask != 0;
-			// if(mask != 0) {
-			// 	print_m512(min_a_y);
-			// 	print_m512(max_b_y);
-			// 	print_m512(min_b_y);
-			// 	print_m512(max_a_y);
-			// 	print_m512_bits(inside_x);
-			// 	print_m512_bits(inside_y);
-			// 	print_m512_bits(inside_z);
-			// 	printf("i: %u, a: %u, b: %u, mask: %08x mask0: %08x\n", i, a, b, mask, mask0);
-			// }
 
 		}
 	}
@@ -4227,7 +4166,6 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	
 	// commit_array<uint32_t>(&temporary, group_count);
 	commit_array<uint64_t>(&temporary, group_count);
-	// printf("Group count: %u\n", group_count);
 	
 	uint32_t* pairs = reserve_array<uint32_t>(&temporary, group_count*simdv_width32, 32);
 	unsigned pair_count = 0;
@@ -4252,7 +4190,6 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 			pairs[pair_count++] = base + index;
 		}
 	}
-	// printf("Coarse pairs: %u, %u\n", pair_count, group_count);
 	
 	commit_array<uint32_t>(&temporary, pair_count);
 	
@@ -4494,21 +4431,7 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	uint32_t written_per_bucket[4] = { bucket_offsets[0], bucket_offsets[1], bucket_offsets[2], bucket_offsets[3] };
 	
 	uint32_t* partitioned_pairs = allocate_array<uint32_t>(&temporary, pair_count + 7, 16); // Padding is required.
-	// printf("paird_count: %u\n", pair_count);
-	// if (pair_count > 0){
-	// 	printf("A paird_count %u: [", pair_count);
-	// 	for (unsigned i = 0; i < pair_count; ++i) {
-	// 		unsigned pair = pairs[i];
-	// 		unsigned a = pair & 0xffff;
-	// 		unsigned b = pair >> 16;
-	// 	  printf("(%3u;%3u), ", a,b);
-	// 	}
-	// 	printf("]\n");
-	// }
-	// else{
-    //    printf("B paird_count: %u\n", pair_count);
-	// }
-	
+
 	for (unsigned i = 0; i < pair_count; ++i) {
 		unsigned pair = pairs[i];
 		
@@ -4531,7 +4454,6 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	}
 	
 	contacts->count += box_box_collide(partitioned_pairs, bucket_sizes[0], colliders.boxes.data, colliders.boxes.transforms, contacts->data + contacts->count, contacts->bodies + contacts->count, contacts->tags + contacts->count, temporary);
-	// printf("after box-box pairs: %u\n", contacts->count);
 	// TODO: SIMD-optimize this loop.
 	for (unsigned i = 0; i < bucket_sizes[1] + bucket_sizes[2]; ++i) {
 		unsigned pair = partitioned_pairs[bucket_offsets[1] + i];
@@ -4547,7 +4469,6 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		contacts->tags[contacts->count] = (uint64_t)((colliders.boxes.transforms[a].body >> 16) | (colliders.spheres.transforms[b].body & 0xffff0000)) << 32;
 		contacts->count += box_sphere_collide(box, sphere, colliders.boxes.transforms[a], colliders.spheres.transforms[b], contacts->data + contacts->count, contacts->bodies + contacts->count);
 	}
-	// printf("after box-sphere pairs: %u\n", contacts->count);
 	
 	// TODO: SIMD-optimize this loop.
 	for (unsigned i = 0; i < bucket_sizes[3]; ++i) {
@@ -4565,7 +4486,6 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		contacts->tags[contacts->count] = (uint64_t)((colliders.spheres.transforms[a].body >> 16) | (colliders.spheres.transforms[b].body & 0xffff0000)) << 32;
 		contacts->count += sphere_sphere_collide(box, sphere, colliders.spheres.transforms[a], colliders.spheres.transforms[b], contacts->data + contacts->count, contacts->bodies + contacts->count);
 	}
-	// printf("after sphere-sphere pairs: %u\n", contacts->count);
 	// Discard islands of inactive objects at a fine level.
 	{
 		NUDGE_ARENA_SCOPE(temporary);
@@ -4952,7 +4872,6 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 	// TODO: We should investigate better evaluation order for contacts.
 	uint32_t* contact_order = contact_impulses->sorted_contacts;
 
-	// printf("enter setup_contact_constraints\n");
 	
 	ContactConstraintData* data = allocate_struct<ContactConstraintData>(memory, 64);
 	data->contact_count = contacts.count;
@@ -4987,8 +4906,6 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 	
 	// Schedule contacts so there are no conflicts within a SIMD width.
 	ContactSlotV* contact_slots = reserve_array<ContactSlotV>(memory, contacts.count, 32);
-
-	// printf("Contact count: %u\n", contacts.count);
 
 	unsigned contact_slot_count = 0;
 	{
@@ -5150,7 +5067,6 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 	data->constraints = constraints;
 	data->constraint_states = constraint_states;
 
-	// printf("Contact slot count: %u\n", contact_slot_count);
 
 	memset(constraint_states, 0, sizeof(ContactConstraintStateV)*contact_slot_count);
 	
@@ -5273,13 +5189,7 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 		normal_velocity_to_normal_impulse = simd::bitwise_and(simd_float::makev(-1.0f) / normal_velocity_to_normal_impulse, nonzero);
 		
 		simdv_float bias = simd_float::makev(-bias_factor) * simd_float::max(penetration - simd_float::makev(allowed_penetration), simd_float::zerov()) * normal_velocity_to_normal_impulse;
-		
-#if NUDGE_SIMDV_WIDTH == 512
-        // printf("bias computed %f, %f:\n", bias_factor, allowed_penetration);
-		// print_m512(penetration);
-		// print_m512(normal_velocity_to_normal_impulse);
-		// print_m512(bias);
-#endif
+
 		// Compute a tangent from the normal. Care is taken to compute a smoothly varying basis to improve stability.
 		simdv_float s = simd_float::abs(normal_x);
 		
@@ -5433,19 +5343,6 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 										  b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w);
 #endif
 
-#if NUDGE_SIMDV_WIDTH == 512
-        // printf("before applying impulse %u:\n", i);
-		// for(int k = 0; k < simdv_width32; ++k)
-		//   printf("%u, ", constraint.a[k]);
-		// printf("\n");
-		// for(int k = 0; k < simdv_width32; ++k)
-		//   printf("%u, ", constraint.b[k]);
-		// printf("\n");
-		// printf("a_vel: %f %f %f\n", bodies.momentum[constraint.a[0]].velocity[0], bodies.momentum[constraint.a[0]].velocity[1], bodies.momentum[constraint.a[0]].velocity[2]);
-		// printf("b_vel: %f %f %f\n", bodies.momentum[constraint.b[0]].velocity[0], bodies.momentum[constraint.b[0]].velocity[1], bodies.momentum[constraint.b[0]].velocity[2]);
-		// print_m512(a_velocity_y);
-		// print_m512(b_velocity_y);
-#endif
 		simdv_float normal_impulse = simd_float::max(normal_x*cached_impulse_x + normal_y*cached_impulse_y + normal_z*cached_impulse_z, simd_float::zerov());
 		simdv_float max_friction_impulse = normal_impulse * friction;
 		
@@ -5492,33 +5389,7 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 		b_angular_velocity_x += b_angular_impulse_x;
 		b_angular_velocity_y += b_angular_impulse_y;
 		b_angular_velocity_z += b_angular_impulse_z;
-#if NUDGE_SIMDV_WIDTH == 512
-        // printf("after applying impulse %u:\n", i);
-		// for(int k = 0; k < simdv_width32; ++k)
-		//   printf("%u, ", constraint.a[k]);
-		// printf("\n");
-		// for(int k = 0; k < simdv_width32; ++k)
-		//   printf("%u, ", constraint.b[k]);
-		// printf("\n");
-		// printf("a_vel: %f %f %f\n", bodies.momentum[constraint.a[0]].velocity[0], bodies.momentum[constraint.a[0]].velocity[1], bodies.momentum[constraint.a[0]].velocity[2]);
-		// printf("b_vel: %f %f %f\n", bodies.momentum[constraint.b[0]].velocity[0], bodies.momentum[constraint.b[0]].velocity[1], bodies.momentum[constraint.b[0]].velocity[2]);
-		// friction_impulse_x*u_y + friction_impulse_y*v_y + normal_y * normal_impulse;
-		// print_m512(cached_impulse_x);
-		// print_m512(cached_impulse_y);
-		// print_m512(cached_impulse_z);
-		// print_m512(friction_clamp_scale);
-		// print_m512(friction_impulse_x);
-		// print_m512(u_y);
-		// print_m512(friction_impulse_y);
-		// print_m512(v_y);
-		// print_m512(normal_y);
-		// print_m512(normal_impulse);
-		// print_m512(linear_impulse_y);
-		// print_m512(a_mass_inverse);
-		// print_m512(a_velocity_y);
-		// print_m512(b_velocity_y);
-#endif
-		
+
 		simd_float::storev(constraint_states[i].applied_normal_impulse, normal_impulse);
 		simd_float::storev(constraint_states[i].applied_friction_impulse_x, friction_impulse_x);
 		simd_float::storev(constraint_states[i].applied_friction_impulse_y, friction_impulse_y);
@@ -5543,7 +5414,6 @@ ContactConstraintData* setup_contact_constraints(ActiveBodies active_bodies, Con
 	
 	data->constraint_batches = contact_slot_count;
 	
-	// printf("Constraint batches: %u\n", data->constraint_batches);
 	return data;
 }
 
@@ -5552,7 +5422,6 @@ void apply_impulses(ContactConstraintData* data, BodyData bodies) {
 	ContactConstraintStateV* constraint_states = data->constraint_states;
 	
 	unsigned constraint_batches = data->constraint_batches;
-	// printf("Applying impulses for %u constraint batches...\n", constraint_batches);
 	
 	for (unsigned i = 0; i < constraint_batches; ++i) {
 		const ContactConstraintV& constraint = constraints[i];
@@ -5588,20 +5457,7 @@ void apply_impulses(ContactConstraintData* data, BodyData bodies) {
 									  b_velocity_x, b_velocity_y, b_velocity_z, b_mass_inverse,
 									  b_angular_velocity_x, b_angular_velocity_y, b_angular_velocity_z, b_angular_velocity_w);
 #endif
-		
-#if NUDGE_SIMDV_WIDTH == 512
-        // printf("before applying impulse %u:\n", i);
-		// for(int k = 0; k < simdv_width32; ++k)
-		//   printf("%f, ", constraint.bias[k]);
-		// printf("\n");
-		// for(int k = 0; k < simdv_width32; ++k)
-		//   printf("%u, ", constraint.b[k]);
-		// printf("\n");
-		// printf("a_vel: %f %f %f\n", bodies.momentum[constraint.a[0]].velocity[0], bodies.momentum[constraint.a[0]].velocity[1], bodies.momentum[constraint.a[0]].velocity[2]);
-		// printf("b_vel: %f %f %f\n", bodies.momentum[constraint.b[0]].velocity[0], bodies.momentum[constraint.b[0]].velocity[1], bodies.momentum[constraint.b[0]].velocity[2]);
-		// print_m512(a_velocity_y);
-		// print_m512(b_velocity_y);
-#endif
+
 		simdv_float pb_z = simd_float::loadv(constraint.pb_z);
 		simdv_float pb_x = simd_float::loadv(constraint.pb_x);
 		simdv_float pb_y = simd_float::loadv(constraint.pb_y);
@@ -5658,33 +5514,17 @@ void apply_impulses(ContactConstraintData* data, BodyData bodies) {
 		simdv_float t_yy = t_y*t_y;
 		simdv_float t_xy = t_x*t_y;
 		simdv_float tl2 = t_xx + t_yy;
-#if NUDGE_SIMDV_WIDTH == 512
-        // printf("for normal impulse %u:\n", i);
-		// print_m512(normal_factor);
-		// print_m512(t_z);
-		// print_m512(normal_bias);
-		// print_m512(normal_impulse);
-#endif
-		
+
 		normal_impulse = simd_float::max(normal_impulse, simd_float::zerov());
-#if NUDGE_SIMDV_WIDTH == 512
-        // printf("normal impulse after max%u:\n", i);
-		// print_m512(normal_impulse);
-#endif
-		
+
 		t_x *= tl2;
 		t_y *= tl2;
-		
+
 		simd_float::storev(constraint_states[i].applied_normal_impulse, normal_impulse);
-		
+
 		simdv_float max_friction_impulse = normal_impulse * simd_float::loadv(constraint.friction);
 		normal_impulse = normal_impulse - old_normal_impulse;
-		
-#if NUDGE_SIMDV_WIDTH == 512
-        // printf("normal impulse after substraction%u:\n", i);
-		// print_m512(old_normal_impulse);
-		// print_m512(normal_impulse);
-#endif
+
 		simdv_float friction_x = simd_float::loadv(constraint.friction_coefficient_x);
 		simdv_float friction_factor = t_xx * friction_x;
 		simdv_float linear_impulse_x = n_x * normal_impulse;
@@ -5785,15 +5625,7 @@ void apply_impulses(ContactConstraintData* data, BodyData bodies) {
 		b_velocity_x = simd_float::madd(linear_impulse_x, b_mass_inverse, b_velocity_x);
 		b_velocity_y = simd_float::madd(linear_impulse_y, b_mass_inverse, b_velocity_y);
 		b_velocity_z = simd_float::madd(linear_impulse_z, b_mass_inverse, b_velocity_z);
-#if NUDGE_SIMDV_WIDTH == 512
-        // printf("after applying impulse %u:\n", i);
-		// print_m512(linear_impulse_y);
-		// print_m512(normal_impulse);
-		// // print_m512(friction_impulse_x);
-		// // print_m512(friction_impulse_y);
-		// print_m512(a_velocity_y);
-		// print_m512(b_velocity_y);
-#endif
+
 		simdv_float ub_x = simd_float::loadv(constraint.ub_x);
 		simdv_float ub_y = simd_float::loadv(constraint.ub_y);
 		simdv_float ub_z = simd_float::loadv(constraint.ub_z);
@@ -5883,12 +5715,9 @@ void advance(ActiveBodies active_bodies, BodyData bodies, float time_step) {
 		dr.v[1] *= half_time_step;
 		dr.v[2] *= half_time_step;
 		dr.s *= half_time_step;
-		// printf("Position before: %u, %u, %f %f %f\n", i, n, bodies.transforms[i].position[0], bodies.transforms[i].position[1], bodies.transforms[i].position[2]);
 		bodies.transforms[i].position[0] += velocity.x * time_step;
 		bodies.transforms[i].position[1] += velocity.y * time_step;
 		bodies.transforms[i].position[2] += velocity.z * time_step;
-		// printf("Position: %u, %u, %f %f %f\n", i, n, bodies.transforms[i].position[0], bodies.transforms[i].position[1], bodies.transforms[i].position[2]);
-		// printf("velocity: %f %f %f dt = %f\n", velocity.x, velocity.y, velocity.z, time_step);
 		bodies.transforms[i].rotation[0] += dr.v[0];
 		bodies.transforms[i].rotation[1] += dr.v[1];
 		bodies.transforms[i].rotation[2] += dr.v[2];

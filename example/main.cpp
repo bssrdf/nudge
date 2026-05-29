@@ -590,40 +590,40 @@ int main(int argc, const char* argv[]) {
 	}
 	
 	// Add boxes.
-	// for (unsigned i = 0; i < 1024; ++i) {
-	for (unsigned i = 0; i < 64; ++i) {
-		float sx = 1.f;
-		float sy = 1.f;
-		float sz = 1.f;
-		// float sx = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
-		// float sy = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
-		// float sz = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
+	for (unsigned i = 0; i < 1024; ++i) {
+	// for (unsigned i = 0; i < 64; ++i) {
+		// float sx = 1.f;
+		// float sy = 1.f;
+		// float sz = 1.f;
+		float sx = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
+		float sy = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
+		float sz = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
 		
 		unsigned body = add_box(8.0f*sx*sy*sz, sx, sy, sz);
 		
-		// bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-		// bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
-		// bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-		bodies.transforms[body].position[0] += i/64.f * 10.0f - 5.0f;
-		bodies.transforms[body].position[1] += (i+10)/64.f * 300.0f;
-		bodies.transforms[body].position[2] += i/64.f * 10.0f - 5.0f;
+		bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+		bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
+		bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+		// bodies.transforms[body].position[0] += i/64.f * 10.0f - 5.0f;
+		// bodies.transforms[body].position[1] += (i+10)/64.f * 300.0f;
+		// bodies.transforms[body].position[2] += i/64.f * 10.0f - 5.0f;
 	}
 	
 	// Add spheres.
-	// for (unsigned i = 0; i < 512; ++i) {
-	// 	float s = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
+	for (unsigned i = 0; i < 512; ++i) {
+		float s = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
 		
-	// 	unsigned body = add_sphere(4.18879f*s*s*s, s);
+		unsigned body = add_sphere(4.18879f*s*s*s, s);
 		
-	// 	bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-	// 	bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
-	// 	bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-	// }
+		bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+		bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
+		bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+	}
 	
 	// Start GLUT.
 	glutInit(&argc, const_cast<char**>(argv));
 	glutInitDisplayMode(GLUT_RGBA | GLUT_DEPTH | GLUT_DOUBLE);
-	glutInitWindowSize(1024, 600);
+	glutInitWindowSize(1024, 1024);
 	glutCreateWindow("nudge");
 	glutDisplayFunc(render);
 	glutKeyboardFunc(key_down);
