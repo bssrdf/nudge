@@ -3362,35 +3362,61 @@ NUDGE_FORCEINLINE static void load16(const float* data, const T* indices,
 #if NUDGE_SIMDV_WIDTH == 512
 	// Load 16 objects individually (8 floats each = 1 AABB in AoS order).
 	// Each AABB: {min.x, min.y, min.z, unused0, max.x, max.y, max.z, unused1}
-	simd8_float t0  = simd_float::load8(data + indices[0*index_stride]*stride_in_floats);
-	simd8_float t1  = simd_float::load8(data + indices[1*index_stride]*stride_in_floats);
-	simd8_float t2  = simd_float::load8(data + indices[2*index_stride]*stride_in_floats);
-	simd8_float t3  = simd_float::load8(data + indices[3*index_stride]*stride_in_floats);
-	simd8_float t4  = simd_float::load8(data + indices[4*index_stride]*stride_in_floats);
-	simd8_float t5  = simd_float::load8(data + indices[5*index_stride]*stride_in_floats);
-	simd8_float t6  = simd_float::load8(data + indices[6*index_stride]*stride_in_floats);
-	simd8_float t7  = simd_float::load8(data + indices[7*index_stride]*stride_in_floats);
-	simd8_float t8  = simd_float::load8(data + indices[8*index_stride]*stride_in_floats);
-	simd8_float t9  = simd_float::load8(data + indices[9*index_stride]*stride_in_floats);
-	simd8_float t10 = simd_float::load8(data + indices[10*index_stride]*stride_in_floats);
-	simd8_float t11 = simd_float::load8(data + indices[11*index_stride]*stride_in_floats);
-	simd8_float t12 = simd_float::load8(data + indices[12*index_stride]*stride_in_floats);
-	simd8_float t13 = simd_float::load8(data + indices[13*index_stride]*stride_in_floats);
-	simd8_float t14 = simd_float::load8(data + indices[14*index_stride]*stride_in_floats);
-	simd8_float t15 = simd_float::load8(data + indices[15*index_stride]*stride_in_floats);
+	// simd8_float t0  = simd_float::load8(data + indices[0*index_stride]*stride_in_floats);
+	// simd8_float t1  = simd_float::load8(data + indices[1*index_stride]*stride_in_floats);
+	// simd8_float t2  = simd_float::load8(data + indices[2*index_stride]*stride_in_floats);
+	// simd8_float t3  = simd_float::load8(data + indices[3*index_stride]*stride_in_floats);
+	// simd8_float t4  = simd_float::load8(data + indices[4*index_stride]*stride_in_floats);
+	// simd8_float t5  = simd_float::load8(data + indices[5*index_stride]*stride_in_floats);
+	// simd8_float t6  = simd_float::load8(data + indices[6*index_stride]*stride_in_floats);
+	// simd8_float t7  = simd_float::load8(data + indices[7*index_stride]*stride_in_floats);
+	// simd8_float t8  = simd_float::load8(data + indices[8*index_stride]*stride_in_floats);
+	// simd8_float t9  = simd_float::load8(data + indices[9*index_stride]*stride_in_floats);
+	// simd8_float t10 = simd_float::load8(data + indices[10*index_stride]*stride_in_floats);
+	// simd8_float t11 = simd_float::load8(data + indices[11*index_stride]*stride_in_floats);
+	// simd8_float t12 = simd_float::load8(data + indices[12*index_stride]*stride_in_floats);
+	// simd8_float t13 = simd_float::load8(data + indices[13*index_stride]*stride_in_floats);
+	// simd8_float t14 = simd_float::load8(data + indices[14*index_stride]*stride_in_floats);
+	// simd8_float t15 = simd_float::load8(data + indices[15*index_stride]*stride_in_floats);
 
-	d0 = simd512::permute128<0,0,0,0>(t0, t4, t8,  t12);
-	d1 = simd512::permute128<0,0,0,0>(t1, t5, t9,  t13);
-	d2 = simd512::permute128<0,0,0,0>(t2, t6, t10, t14);
-	d3 = simd512::permute128<0,0,0,0>(t3, t7, t11, t15);
+	// d0 = simd512::permute128<0,0,0,0>(t0, t4, t8,  t12);
+	// d1 = simd512::permute128<0,0,0,0>(t1, t5, t9,  t13);
+	// d2 = simd512::permute128<0,0,0,0>(t2, t6, t10, t14);
+	// d3 = simd512::permute128<0,0,0,0>(t3, t7, t11, t15);
 
-	d4 = simd512::permute128<1,1,1,1>(t0, t4, t8,  t12);
-	d5 = simd512::permute128<1,1,1,1>(t1, t5, t9,  t13);
-	d6 = simd512::permute128<1,1,1,1>(t2, t6, t10, t14);
-	d7 = simd512::permute128<1,1,1,1>(t3, t7, t11, t15);
+	// d4 = simd512::permute128<1,1,1,1>(t0, t4, t8,  t12);
+	// d5 = simd512::permute128<1,1,1,1>(t1, t5, t9,  t13);
+	// d6 = simd512::permute128<1,1,1,1>(t2, t6, t10, t14);
+	// d7 = simd512::permute128<1,1,1,1>(t3, t7, t11, t15);
 
-	simd512::transpose32(d0, d1, d2, d3);
-	simd512::transpose32(d4, d5, d6, d7);
+	// simd512::transpose32(d0, d1, d2, d3);
+	// simd512::transpose32(d4, d5, d6, d7);
+	simd16_int32 one = simd_int32::make16(1);
+    simd16_int32 vindex = simd_int32::make16(
+        indices[0*index_stride]*stride_in_floats,  indices[1*index_stride]*stride_in_floats,
+        indices[2*index_stride]*stride_in_floats,  indices[3*index_stride]*stride_in_floats,
+        indices[4*index_stride]*stride_in_floats,  indices[5*index_stride]*stride_in_floats,
+        indices[6*index_stride]*stride_in_floats,  indices[7*index_stride]*stride_in_floats,
+        indices[8*index_stride]*stride_in_floats,  indices[9*index_stride]*stride_in_floats,
+        indices[10*index_stride]*stride_in_floats, indices[11*index_stride]*stride_in_floats,
+        indices[12*index_stride]*stride_in_floats, indices[13*index_stride]*stride_in_floats,
+        indices[14*index_stride]*stride_in_floats, indices[15*index_stride]*stride_in_floats
+    );
+    d0 = _mm512_i32gather_ps (vindex, data, 4);
+    vindex = simd_int32 ::add(vindex, one);
+    d1 = _mm512_i32gather_ps (vindex, data, 4);
+    vindex = simd_int32 ::add(vindex, one);
+    d2 = _mm512_i32gather_ps (vindex, data, 4);
+    vindex = simd_int32 ::add(vindex, one);
+    d3 = _mm512_i32gather_ps (vindex, data, 4);
+    vindex = simd_int32 ::add(vindex, one);
+    d4 = _mm512_i32gather_ps (vindex, data, 4);
+    vindex = simd_int32 ::add(vindex, one);
+    d5 = _mm512_i32gather_ps (vindex, data, 4);
+    vindex = simd_int32 ::add(vindex, one);
+    d6 = _mm512_i32gather_ps (vindex, data, 4);
+    vindex = simd_int32 ::add(vindex, one);
+    d7 = _mm512_i32gather_ps (vindex, data, 4);
 #endif
 }
 
