@@ -33,10 +33,11 @@
 #include <OpenGL/gl.h>
 #else
 #include <GLUT/glut.h>
+#include <GLUT/freeglut_ext.h>  // for glutMouseWheelFunc
 #include <gl/gl.h>
 #ifdef _WIN32
 #ifndef _WIN32_WINNT
-#define _WIN32_WINNT 0x0601  // Windows 7+ for RAWMOUSE.lLastMoveX/Y
+#define _WIN32_WINNT 0x0601  // Windows 7+
 #endif
 #include <windows.h>
 #endif
@@ -55,87 +56,42 @@ static nudge::ContactData contact_data;
 static nudge::ContactCache contact_cache;
 static nudge::ActiveBodies active_bodies;
 
-// Camera state
-static float camera_position[3] = { 0.0f, 5.0f, 20.0f };
-static float camera_yaw = 0.0f;    // radians, horizontal rotation
-static float camera_pitch = 0.0f;  // radians, vertical rotation
-static bool mouse_locked = false;
+// Camera state — OrbitControls style (three.js inspired)
+// Spherical coordinates: camera orbits around a target point
+static float orbit_target[3]   = { 0.0f, 5.0f, 0.0f };   // center of orbit
+static float orbit_theta  = 0.0f;   // horizontal angle (radians)
+static float orbit_phi   = 0.4f;   // vertical angle (radians), 0 = straight down, PI = straight up
+static float orbit_radius = 40.0f;  // distance from target
 
-// Camera settings
-static const float camera_move_speed = 40.0f;
-static const float camera_mouse_sensitivity = 0.001f;
-static const float camera_pitch_max = 1.5f;  // ~85 degrees
+// Damping (smooth deceleration)
+static float orbit_theta_delta  = 0.0f;
+static float orbit_phi_delta    = 0.0f;
+static float orbit_radius_delta = 0.0f;
+static float orbit_pan_x_delta  = 0.0f;
+static float orbit_pan_y_delta  = 0.0f;
+static float orbit_pan_z_delta  = 0.0f;
+
+// Mouse drag state
+static bool mouse_left_down  = false;   // orbit
+static bool mouse_right_down = false;   // pan
+static int  mouse_last_x = 0, mouse_last_y = 0;
+
+// Camera settings (OrbitControls-style)
+static const float orbit_damping_factor     = 0.08f;   // higher = less damping (three.js default ~0.05-0.1)
+static const float orbit_rotate_speed       = 0.001f;  // radians per pixel
+static const float orbit_zoom_speed         = 0.04f;   // radius change per scroll tick
+static const float orbit_pan_speed          = 0.008f;  // pan scale per pixel
+static const float orbit_min_radius         = 2.0f;
+static const float orbit_max_radius         = 500.0f;
+static const float orbit_min_phi            = 0.01f;   // near straight down
+static const float orbit_max_phi            = 3.12f;   // near straight up (PI - 0.02)
 
 // Key state tracked by GLUT callbacks
 static bool key_state[256] = {};
 static int debug_frame = 0;
 
-// Raw mouse input (Windows)
-#ifdef _WIN32
-static int raw_mouse_dx = 0, raw_mouse_dy = 0;
-static HWND raw_input_hwnd = NULL;
-static WNDPROC raw_input_old_proc = NULL;
-
-static LRESULT CALLBACK RawInputWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
-{
-    if (msg == WM_INPUT) {
-        UINT size = 0;
-        GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &size, sizeof(RAWINPUTHEADER));
-        if (size > 0 && size < 4096) {
-            uint8_t buf[4096];
-            UINT read = GetRawInputData((HRAWINPUT)lParam, RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER));
-            if (read != UINT_MAX && read == size) {
-                RAWINPUT* ri = (RAWINPUT*)buf;
-                if (ri->header.dwType == RIM_TYPEMOUSE) {
-                    LONG dx = ri->data.mouse.lLastX;
-                    LONG dy = ri->data.mouse.lLastY;
-                    raw_mouse_dx += dx;
-                    raw_mouse_dy += dy;
-                }
-            }
-        }
-        return 0;
-    }
-    return CallWindowProc(raw_input_old_proc, hwnd, msg, wParam, lParam);
-}
-
-static void raw_input_init(HWND hwnd)
-{
-    raw_input_hwnd = hwnd;
-    RAWINPUTDEVICE rid;
-    rid.usUsagePage = 1;  // Generic desktop
-    rid.usUsage = 2;       // Mouse
-    rid.dwFlags = RIDEV_INPUTSINK;  // Receive even when not focused
-    rid.hwndTarget = hwnd;
-    RegisterRawInputDevices(&rid, 1, sizeof(rid));
-
-    raw_input_old_proc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)RawInputWndProc);
-}
-
-static void raw_input_shutdown()
-{
-    if (raw_input_hwnd && raw_input_old_proc) {
-        SetWindowLongPtr(raw_input_hwnd, GWLP_WNDPROC, (LONG_PTR)raw_input_old_proc);
-    }
-    raw_input_hwnd = NULL;
-    raw_input_old_proc = NULL;
-}
-
-static void raw_input_poll() {
-    if (!mouse_locked) return;
-    if (raw_mouse_dx == 0 && raw_mouse_dy == 0) return;
-
-    camera_yaw -= raw_mouse_dx * camera_mouse_sensitivity;
-    camera_pitch -= raw_mouse_dy * camera_mouse_sensitivity;
-    if (camera_pitch < -camera_pitch_max) camera_pitch = -camera_pitch_max;
-    if (camera_pitch > camera_pitch_max) camera_pitch = camera_pitch_max;
-
-    raw_mouse_dx = 0;
-    raw_mouse_dy = 0;
-}
-#else
+// No-op — raw input replaced by GLUT mouse callbacks
 static void raw_input_poll() {}
-#endif
 
 static void draw_sky();
 
@@ -197,11 +153,69 @@ static inline void matrix(float r[16], const float s[3], const float q[4], const
 	r[15] = 1.0f;
 }
 
-// Compute the camera's look-at target from yaw and pitch.
-static inline void camera_look_target(float target[3], const float pos[3], float yaw, float pitch) {
-    target[0] = pos[0] - sinf(yaw) * cosf(pitch);
-    target[1] = pos[1] + sinf(pitch);
-    target[2] = pos[2] - cosf(yaw) * cosf(pitch);
+// Compute camera position from spherical coordinates (orbit around target).
+// Returns [eye_x, eye_y, eye_z].
+static inline void orbit_camera_eye(float eye[3]) {
+    float sin_phi = sinf(orbit_phi);
+    eye[0] = orbit_target[0] + orbit_radius * sin_phi * cosf(orbit_theta);
+    eye[1] = orbit_target[1] + orbit_radius * cosf(orbit_phi);
+    eye[2] = orbit_target[2] + orbit_radius * sin_phi * sinf(orbit_theta);
+}
+
+// Compute a look-at target with slight offset (for proper up vector).
+static inline void orbit_camera_target(float target[3]) {
+    target[0] = orbit_target[0];
+    target[1] = orbit_target[1];
+    target[2] = orbit_target[2];
+}
+
+// Apply damping to orbit deltas (smooth deceleration, three.js style).
+static inline void orbit_apply_damping(float dt) {
+    // Exponential decay: delta *= (1 - damping)^dt
+    float factor = 1.0f - orbit_damping_factor;
+    orbit_theta_delta *= factor;
+    orbit_phi_delta   *= factor;
+    orbit_radius_delta *= factor;
+    orbit_pan_x_delta  *= factor;
+    orbit_pan_y_delta  *= factor;
+    orbit_pan_z_delta  *= factor;
+
+    // Apply accumulated deltas
+    orbit_theta  += orbit_theta_delta;
+    orbit_phi    += orbit_phi_delta;
+    orbit_radius += orbit_radius_delta;
+    orbit_target[0] += orbit_pan_x_delta;
+    orbit_target[1] += orbit_pan_y_delta;
+    orbit_target[2] += orbit_pan_z_delta;
+
+    // Clamp phi (avoid gimbal lock at poles)
+    if (orbit_phi < orbit_min_phi)   orbit_phi   = orbit_min_phi;
+    if (orbit_phi > orbit_max_phi)   orbit_phi   = orbit_max_phi;
+    if (orbit_phi < 0.0f)            orbit_phi   = 0.0f;
+    if (orbit_phi > 3.14159265f)     orbit_phi   = 3.14159265f;
+
+    // Clamp radius
+    if (orbit_radius < orbit_min_radius) orbit_radius = orbit_min_radius;
+    if (orbit_radius > orbit_max_radius) orbit_radius = orbit_max_radius;
+
+    // Zero out very small deltas to avoid floating point noise
+    if (fabsf(orbit_theta_delta) < 1e-6f) orbit_theta_delta = 0.0f;
+    if (fabsf(orbit_phi_delta)   < 1e-6f) orbit_phi_delta   = 0.0f;
+    if (fabsf(orbit_radius_delta) < 1e-6f) orbit_radius_delta = 0.0f;
+    if (fabsf(orbit_pan_x_delta)  < 1e-6f) orbit_pan_x_delta  = 0.0f;
+    if (fabsf(orbit_pan_y_delta)  < 1e-6f) orbit_pan_y_delta  = 0.0f;
+    if (fabsf(orbit_pan_z_delta)  < 1e-6f) orbit_pan_z_delta  = 0.0f;
+}
+
+// Handle orbit input from key state (scroll to zoom, Q/E to pan vertically)
+static inline void orbit_key_input(float dt) {
+    // Scroll-like zoom with Q/E keys as fallback
+    if (key_state['Q'] || key_state['q']) {
+        orbit_radius_delta += orbit_zoom_speed * 2.0f;  // zoom out
+    }
+    if (key_state['E'] || key_state['e']) {
+        orbit_radius_delta -= orbit_zoom_speed * 2.0f;  // zoom in
+    }
 }
 
 static inline unsigned add_box(float mass, float cx, float cy, float cz) {
@@ -278,19 +292,35 @@ static inline void shoot_sphere() {
         const float mass = 4.18879f * radius * radius * radius;
         unsigned body = add_sphere(mass, radius);
         if (body) {
-            // Place sphere just in front of the camera
-            float cp = cosf(camera_pitch), sp = sinf(camera_pitch);
-            float cy = cosf(camera_yaw), sy = sinf(camera_yaw);
-            float dist = radius + 1.0f;
-            bodies.transforms[body].position[0] = camera_position[0] - sy * cp * dist;
-            bodies.transforms[body].position[1] = camera_position[1] + sp * dist;
-            bodies.transforms[body].position[2] = camera_position[2] - cy * cp * dist;
+            // Camera eye position and look direction
+            float eye[3];
+            orbit_camera_eye(eye);
+            float sin_phi = sinf(orbit_phi);
+            float sin_theta = sinf(orbit_theta);
+            float cos_theta = cosf(orbit_theta);
+            float cos_phi = cosf(orbit_phi);
+
+            // Direction from eye to target (forward vector)
+            float dir_x = orbit_target[0] - eye[0];
+            float dir_y = orbit_target[1] - eye[1];
+            float dir_z = orbit_target[2] - eye[2];
+            float len = sqrtf(dir_x*dir_x + dir_y*dir_y + dir_z*dir_z);
+            if (len > 0.001f) {
+                dir_x /= len;
+                dir_y /= len;
+                dir_z /= len;
+            }
+
+            float dist = radius + 3.0f;
+            bodies.transforms[body].position[0] = eye[0] + dir_x * dist;
+            bodies.transforms[body].position[1] = eye[1] + dir_y * dist;
+            bodies.transforms[body].position[2] = eye[2] + dir_z * dist;
 
             // Shoot along view direction
             const float shoot_speed = 200.0f;
-            bodies.momentum[body].velocity[0] = -sy * cp * shoot_speed;
-            bodies.momentum[body].velocity[1] = sp * shoot_speed;
-            bodies.momentum[body].velocity[2] = -cy * cp * shoot_speed;
+            bodies.momentum[body].velocity[0] = dir_x * shoot_speed;
+            bodies.momentum[body].velocity[1] = dir_y * shoot_speed;
+            bodies.momentum[body].velocity[2] = dir_z * shoot_speed;
             printf("[shoot] sphere body=%u radius=%.1f speed=%.0f\n", body, radius, shoot_speed);
         }
     }
@@ -299,16 +329,9 @@ static inline void shoot_sphere() {
     }
 }
 
-// Update camera position based on held keys and delta time.
-static inline void camera_update(float dt) {
-    // Debug: print key states every 30 frames to verify input.
+// Update orbit camera: apply damping, key input, and clamp values.
+static inline void orbit_camera_update(float dt) {
     debug_frame++;
-    if (debug_frame % 30 == 0) {
-        printf("[camera] pos=(%.1f,%.1f,%.1f) yaw=%.2f pitch=%.2f mouse=%d keys:w=%d s=%d a=%d d=%d\n",
-               camera_position[0], camera_position[1], camera_position[2],
-               camera_yaw, camera_pitch, mouse_locked,
-               key_state['W'], key_state['S'], key_state['A'], key_state['D']);
-    }
 
     if (key_state[27]) exit(0);  // Escape
 
@@ -333,38 +356,15 @@ static inline void camera_update(float dt) {
         box_dropped = false;
     }
 
-    float speed = camera_move_speed * dt;
-    if (key_state['X'] || key_state['x']) speed *= 3.0f;  // Hold X to sprint
+    // Keyboard orbit controls (arrow keys / WASD for orbit without mouse)
+    float key_orbit_speed = 2.0f * dt;  // radians per second
+    if (key_state['W'] || key_state['w']) { orbit_phi_delta -= key_orbit_speed * 0.5f; }  // look up
+    if (key_state['S'] || key_state['s']) { orbit_phi_delta += key_orbit_speed * 0.5f; }  // look down
+    if (key_state['A'] || key_state['a']) { orbit_theta_delta += key_orbit_speed; }        // orbit left
+    if (key_state['D'] || key_state['d']) { orbit_theta_delta -= key_orbit_speed; }        // orbit right
 
-    float cy = cosf(camera_yaw), sy = sinf(camera_yaw);
-    float cp = cosf(camera_pitch), sp = sinf(camera_pitch);
-
-    // Forward: -z in camera space (yaw + pitch for vertical movement)
-    float forward_x = -sy * cp;
-    float forward_y = sp;
-    float forward_z = -cy * cp;
-
-    // Right: +x in camera space (yaw only, always horizontal)
-    float right_x = cy;
-    float right_z = -sy;
-
-    float dx = 0.0f, dy = 0.0f, dz = 0.0f;
-    if (key_state['W'] || key_state['w']) { dx += forward_x; dy += forward_y; dz += forward_z; }
-    if (key_state['S'] || key_state['s']) { dx -= forward_x; dy -= forward_y; dz -= forward_z; }
-    if (key_state['A'] || key_state['a']) { dx -= right_x; dz -= right_z; }
-    if (key_state['D'] || key_state['d']) { dx += right_x; dz += right_z; }
-
-    // Normalize if diagonal
-    float len = sqrtf(dx * dx + dy * dy + dz * dz);
-    if (len > 0.001f) {
-        dx = (dx / len) * speed;
-        dy = (dy / len) * speed;
-        dz = (dz / len) * speed;
-    }
-
-    camera_position[0] += dx;
-    camera_position[1] += dy;
-    camera_position[2] += dz;
+    orbit_key_input(dt);
+    orbit_apply_damping(dt);
 }
 
 // GLUT keyboard callbacks - track key state.
@@ -380,17 +380,79 @@ static void key_up(unsigned char key, int, int) {
 }
 
 static void mouse_motion(int x, int y) {
-    // No-op: camera rotation is handled by raw_input_poll() on Windows,
-    // or falls through to normal GLUT motion when mouse is unlocked.
-    (void)x; (void)y;
+    if (mouse_left_down) {
+        // Orbit: left button drag changes theta and phi (spherical coordinates)
+        int dx = x - mouse_last_x;
+        int dy = y - mouse_last_y;
+
+        orbit_theta_delta -= dx * orbit_rotate_speed;
+        orbit_phi_delta   -= dy * orbit_rotate_speed;
+    } else if (mouse_right_down) {
+        // Pan: right button drag moves the orbit target in camera's X/Y plane
+        int dx = x - mouse_last_x;
+        int dy = y - mouse_last_y;
+
+        // Pan speed scales with distance (closer = smaller pan, further = larger pan)
+        float pan_scale = orbit_radius * orbit_pan_speed / 100.0f;
+
+        // Compute camera right and up vectors for panning
+        float sin_theta = sinf(orbit_theta);
+        float cos_theta = cosf(orbit_theta);
+
+        // Camera right vector (tangent to orbit, horizontal)
+        float right_x = cos_theta;
+        float right_z = -sin_theta;
+
+        // Camera up vector (in the orbit plane, vertical)
+        float up_x = sin_theta * cosf(orbit_phi);
+        float up_y = cosf(orbit_phi);
+        float up_z = -cos_theta * cosf(orbit_phi);
+
+        // Pan: -dx moves target right, -dy moves target up (matching screen direction)
+        // Negate dx because dragging right should move camera left (target moves opposite)
+        orbit_pan_x_delta += (-dx * right_x + dy * up_x) * pan_scale;
+        orbit_pan_y_delta += (dy * up_y) * pan_scale;
+        orbit_pan_z_delta += (-dx * right_z + dy * up_z) * pan_scale;
+    }
+
+    mouse_last_x = x;
+    mouse_last_y = y;
 }
 
 static void mouse_button(int button, int state, int x, int y) {
-    if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
-        mouse_locked = !mouse_locked;
-        printf("[mouse] locked=%d\n", mouse_locked);
+    if (button == GLUT_LEFT_BUTTON) {
+        mouse_left_down = (state == GLUT_DOWN);
+        if (mouse_left_down) {
+            mouse_last_x = x;
+            mouse_last_y = y;
+        }
+    } else if (button == GLUT_RIGHT_BUTTON) {
+        mouse_right_down = (state == GLUT_DOWN);
+        if (mouse_right_down) {
+            mouse_last_x = x;
+            mouse_last_y = y;
+        }
+    } else if (button == GLUT_MIDDLE_BUTTON) {
+        // Middle button: pan (alternative to right button)
+        mouse_right_down = (state == GLUT_DOWN);
+        if (mouse_right_down) {
+            mouse_last_x = x;
+            mouse_last_y = y;
+        }
     }
-    (void)x; (void)y;
+}
+
+// Mouse wheel callback (freeglut extension — works on Windows/macOS/Linux)
+static void mouse_wheel(int wheel, int direction, int x, int y) {
+    // direction: +1 = up (zoom in), -1 = down (zoom out)
+    // three.js style: exponential zoom
+    float zoom_factor = 1.0f - (float)direction * orbit_zoom_speed;
+    orbit_radius_delta -= orbit_radius * (zoom_factor - 1.0f);
+    (void)x; (void)y; (void)wheel;
+}
+
+static void resize(int w, int h) {
+    glViewport(0, 0, w, h);
 }
 
 
@@ -440,16 +502,18 @@ static void render() {
 		glLoadMatrixf(m);
 	}
 
-	// Switch to modelview and set up camera with gluLookAt.
+	// Switch to modelview and set up orbit camera with gluLookAt.
 	glMatrixMode(GL_MODELVIEW);
 	glLoadIdentity();
 	{
+		float eye[3];
 		float target[3];
-		camera_look_target(target, camera_position, camera_yaw, camera_pitch);
+		orbit_camera_eye(eye);
+		orbit_camera_target(target);
 		gluLookAt(
-			camera_position[0], camera_position[1], camera_position[2],
+			eye[0], eye[1], eye[2],
 			target[0], target[1], target[2],
-			0.0f, 1.0f, 0.0f  // up vector
+			0.0f, 1.0f, 0.0f  // world up vector
 		);
 	}
 
@@ -664,8 +728,7 @@ static void simulate() {
 }
 
 static void timer(int) {
-	raw_input_poll();
-	camera_update(1.0f / 60.0f);
+	orbit_camera_update(1.0f / 60.0f);
 	glutPostRedisplay();
 	glutTimerFunc(16, timer, 0);
 	simulate();
@@ -794,19 +857,10 @@ int main(int argc, const char* argv[]) {
 	glutMotionFunc(mouse_motion);
 	glutPassiveMotionFunc(mouse_motion);
 	glutMouseFunc(mouse_button);
+	glutMouseWheelFunc(mouse_wheel);
+	glutReshapeFunc(resize);
 
-#ifdef _WIN32
-	HWND hwnd = GetForegroundWindow();
-	if (hwnd) {
-		raw_input_init(hwnd);
-		printf("[raw input] initialized on window 0x%p\n", hwnd);
-	} else {
-		printf("[raw input] WARNING: no foreground window\n");
-	}
-#endif
-
-	printf("Controls: click to lock/unlock mouse | WASD move (W/S follows pitch) | X sprint | B drop box | Space shoot sphere | Esc quit\n");
-	printf("[debug] key states printed every 30 frames\n");
+	printf("OrbitControls: LMB drag=orbit | RMB/MDB drag=pan | scroll=zoom | WASD=keyboard orbit | Q/E=zoom | B=drop box | Space=shoot sphere | Esc=quit\n");
 
 	timer(0);
 	
