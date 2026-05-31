@@ -35,9 +35,9 @@
 #include <gl/gl.h>
 #endif
 
-static const unsigned max_body_count = 2048;
-static const unsigned max_box_count = 2048;
-static const unsigned max_sphere_count = 2048;
+static const unsigned max_body_count = 19200;
+static const unsigned max_box_count = 8192;
+static const unsigned max_sphere_count = 4096;
 
 static const nudge::Transform identity_transform = { {}, 0, { 0.0f, 0.0f, 0.0f, 1.0f } };
 
@@ -132,8 +132,10 @@ static inline unsigned add_box(float mass, float cx, float cy, float cz) {
 	if (bodies.count == max_body_count || colliders.boxes.count == max_box_count)
 		return 0;
 
-	unsigned body = bodies.count++;
-	unsigned collider = colliders.boxes.count++;
+	// unsigned body = bodies.count++;
+	// unsigned collider = colliders.boxes.count++;
+	unsigned body = ++bodies.count;
+	unsigned collider = ++colliders.boxes.count;
 
 	float k = mass * (1.0f / 3.0f);
 
@@ -451,7 +453,7 @@ static void render() {
 
 static void simulate() {
 	static const unsigned steps = 2;
-	static const unsigned iterations = 20;
+	static const unsigned iterations = 10;
 	
 	float time_step = 1.0f / (60.0f * (float)steps);
 	
@@ -539,7 +541,8 @@ int main(int argc, const char* argv[]) {
 #endif
 	
 	// Allocate memory for simulation arena.
-	arena.size = 64*1024*1024;
+	// arena.size = 64*1024*1024;
+	arena.size = 256*1024*1024;
 	arena.data = _mm_malloc(arena.size, 4096);
 	
 	// Allocate memory for bodies, colliders, and contacts.
@@ -590,7 +593,7 @@ int main(int argc, const char* argv[]) {
 	}
 	
 	// Add boxes.
-	for (unsigned i = 0; i < 1024; ++i) {
+	for (unsigned i = 0; i < 4096; ++i) {
 	// for (unsigned i = 0; i < 64; ++i) {
 		// float sx = 1.f;
 		// float sy = 1.f;
@@ -601,16 +604,19 @@ int main(int argc, const char* argv[]) {
 		
 		unsigned body = add_box(8.0f*sx*sy*sz, sx, sy, sz);
 		
-		bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-		bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
-		bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+		// bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+		// bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
+		// bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+		bodies.transforms[body].position[0] = (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
+		bodies.transforms[body].position[1] = (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
+		bodies.transforms[body].position[2] = (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
 		// bodies.transforms[body].position[0] += i/64.f * 10.0f - 5.0f;
-		// bodies.transforms[body].position[1] += (i+10)/64.f * 300.0f;
+		// bodies.transforms[body].position[1] += (i+10)/1024.f * 300.0f;
 		// bodies.transforms[body].position[2] += i/64.f * 10.0f - 5.0f;
 	}
 	
 	// Add spheres.
-	for (unsigned i = 0; i < 512; ++i) {
+	for (unsigned i = 0; i < 1024; ++i) {
 		float s = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
 		
 		unsigned body = add_sphere(4.18879f*s*s*s, s);
