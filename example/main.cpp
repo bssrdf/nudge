@@ -58,10 +58,10 @@ static nudge::ActiveBodies active_bodies;
 
 // Camera state — OrbitControls style (three.js inspired)
 // Spherical coordinates: camera orbits around a target point
-static float orbit_target[3]   = { 0.0f, 5.0f, 0.0f };   // center of orbit
-static float orbit_theta  = 0.0f;   // horizontal angle (radians)
-static float orbit_phi   = 0.4f;   // vertical angle (radians), 0 = straight down, PI = straight up
-static float orbit_radius = 40.0f;  // distance from target
+static float orbit_target[3]   = { 0.0f, 10.0f, 0.0f };  // center of scene, mid-height of skyscraper
+static float orbit_theta  = 0.5f;   // horizontal angle (radians)
+static float orbit_phi   = 0.6f;   // vertical angle (radians)
+static float orbit_radius = 70.0f;  // distance from target — far enough to see the scene
 
 // Damping (smooth deceleration)
 static float orbit_theta_delta  = 0.0f;
@@ -94,6 +94,354 @@ static int debug_frame = 0;
 static void raw_input_poll() {}
 
 static void draw_sky();
+
+// Forward declarations (defined below)
+static inline unsigned add_box(float mass, float cx, float cy, float cz);
+static inline unsigned add_sphere(float mass, float radius);
+static void build_old_scene();
+
+// =============================================================================
+// KEVLA-style plank builder
+// =============================================================================
+// Plank dimensions (length x thickness x width)
+// Ratio ~ 10 : 1 : 2 — thin, flat, like a wooden plank or K'NEX/KEVLA plank
+static const float plank_length   = 15.0f;
+static const float plank_thickness = 1.0f;
+static const float plank_width    = 3.0f;
+static const float plank_mass     = 2.0f;
+
+// Tiny random offset to prevent perfect stacking (avoids penetration explosions)
+static inline float jitter() {
+    return ((float)rand() / (float)RAND_MAX) * 0.1f - 0.05f;
+}
+
+// Ground surface Y (ground box is at -20, height 10 → surface at -15)
+static const float ground_y = -15.0f;
+
+// Place a plank at a given world position with given orientation.
+// orientation: 0=horizontal (length along X, stacked on Y)
+//              1=flat (length along X, flat on Z — for floors/ceilings)
+//              2=horizontal_z (length along Z, stacked on Y — walls facing X)
+//              3=vertical (standing on end — for posts/columns)
+static inline unsigned place_plank(float px, float py, float pz, unsigned orientation) {
+    float sx, sy, sz;
+    switch (orientation) {
+        case 0: // horizontal, length along X
+            sx = plank_length;   sy = plank_thickness; sz = plank_width;
+            break;
+        case 1: // flat (floor/ceiling), length along X
+            sx = plank_length;   sy = plank_width;     sz = plank_thickness;
+            break;
+        case 2: // horizontal, length along Z
+            sx = plank_width;    sy = plank_thickness; sz = plank_length;
+            break;
+        case 3: // vertical post
+            sx = plank_width;    sy = plank_length;    sz = plank_thickness;
+            break;
+        default:
+            sx = plank_length;   sy = plank_thickness; sz = plank_width;
+    }
+    unsigned body = add_box(plank_mass, sx, sy, sz);
+    if (body) {
+        bodies.transforms[body].position[0] = px + jitter();
+        bodies.transforms[body].position[1] = py + jitter();
+        bodies.transforms[body].position[2] = pz + jitter();
+    }
+    return body;
+}
+
+// Build a hollow rectangular box (walls only, no floor/ceiling).
+// Walls are staggered for stability. 'gap_x'/'gap_z' leave openings.
+static void build_wall_box(float cx, float cz, float half_w, float half_d, unsigned num_layers) {
+    // Front wall (along X, at z = cz + half_d)
+    for (unsigned layer = 0; layer < num_layers; layer++) {
+        float y = ground_y + (layer + 0.5f) * plank_thickness + plank_thickness * 0.5f;
+        float stagger = (layer % 2 == 0) ? 0.0f : plank_length * 0.5f;
+        for (float x = -half_w; x < half_w; x += plank_length) {
+            place_plank(cx + x + stagger, y, cz + half_d, 0);
+        }
+    }
+    // Back wall (along X, at z = cz - half_d)
+    for (unsigned layer = 0; layer < num_layers; layer++) {
+        float y = ground_y + (layer + 0.5f) * plank_thickness + plank_thickness * 0.5f;
+        float stagger = (layer % 2 == 0) ? 0.0f : plank_length * 0.5f;
+        for (float x = -half_w; x < half_w; x += plank_length) {
+            place_plank(cx + x + stagger, y, cz - half_d, 0);
+        }
+    }
+    // Left wall (along Z, at x = cx - half_w)
+    for (unsigned layer = 0; layer < num_layers; layer++) {
+        float y = ground_y + (layer + 0.5f) * plank_thickness + plank_thickness * 0.5f;
+        float stagger = (layer % 2 == 0) ? 0.0f : plank_length * 0.5f;
+        for (float z = -half_d; z < half_d; z += plank_length) {
+            place_plank(cx - half_w, y, cz + z + stagger, 2);
+        }
+    }
+    // Right wall (along Z, at x = cx + half_w)
+    for (unsigned layer = 0; layer < num_layers; layer++) {
+        float y = ground_y + (layer + 0.5f) * plank_thickness + plank_thickness * 0.5f;
+        float stagger = (layer % 2 == 0) ? 0.0f : plank_length * 0.5f;
+        for (float z = -half_d; z < half_d; z += plank_length) {
+            place_plank(cx + half_w, y, cz + z + stagger, 2);
+        }
+    }
+}
+
+// Build a floor/ceiling slab
+static void build_slab(float cx, float cz, float half_w, float half_d, float y) {
+    for (float x = -half_w; x < half_w; x += plank_length) {
+        for (float z = -half_d; z < half_d; z += plank_width) {
+            place_plank(cx + x, y, cz + z, 1);
+        }
+    }
+}
+
+// Build a simple house: walls + roof slabs
+static void build_house(float cx, float cz, unsigned half_w_planks, unsigned half_d_planks, unsigned wall_layers) {
+    float half_w = (float)half_w_planks * plank_length;
+    float half_d = (float)half_d_planks * plank_length;
+
+    // Walls
+    build_wall_box(cx, cz, half_w, half_d, wall_layers);
+
+    // Floor (slightly above ground)
+    build_slab(cx, cz, half_w, half_d, ground_y + plank_thickness * 0.5f);
+
+    // Roof (top of walls + slight overhang)
+    float roof_y = ground_y + wall_layers * plank_thickness + plank_thickness;
+    build_slab(cx, cz, half_w + plank_length, half_d + plank_length, roof_y);
+
+    // Cross-bracing every few layers for stability
+    for (unsigned layer = 0; layer < wall_layers; layer += 4) {
+        float y = ground_y + (layer + 0.5f) * plank_thickness;
+        // Diagonal-ish supports: vertical posts at corners
+        place_plank(cx - half_w, y, cz - half_d, 3);
+        place_plank(cx + half_w, y, cz + half_d, 3);
+    }
+}
+
+// Build a skyscraper: tall walls with periodic cross-bracing and floor slabs
+static void build_skyscraper(float cx, float cz, unsigned half_w_planks, unsigned half_d_planks, unsigned num_floors) {
+    float half_w = (float)half_w_planks * plank_length;
+    float half_d = (float)half_d_planks * plank_length;
+    unsigned planks_per_floor = 3; // 3 plank-layers per floor level
+
+    // Walls: continuous stack
+    unsigned total_layers = num_floors * planks_per_floor;
+    build_wall_box(cx, cz, half_w, half_d, total_layers);
+
+    // Floor slabs at each floor level
+    for (unsigned floor = 0; floor <= num_floors; floor++) {
+        float y = ground_y + floor * planks_per_floor * plank_thickness;
+        build_slab(cx, cz, half_w - plank_length * 0.5f, half_d - plank_length * 0.5f, y + plank_thickness);
+    }
+
+    // Corner columns for extra stability
+    for (int ix = -1; ix <= 1; ix += 2) {
+        for (int iz = -1; iz <= 1; iz += 2) {
+            float px = cx + ix * half_w;
+            float pz = cz + iz * half_d;
+            // Stack vertical posts
+            for (unsigned col = 0; col < total_layers / 2; col++) {
+                place_plank(px, ground_y + col * plank_length, pz, 3);
+            }
+        }
+    }
+}
+
+// Build a tower: circular-ish, staggered rings
+static void build_tower(float cx, float cz, unsigned radius_planks, unsigned num_layers) {
+    float radius = (float)radius_planks * plank_length;
+    unsigned planks_per_ring = (unsigned)(6.283f * radius / plank_length) + 1;
+
+    for (unsigned layer = 0; layer < num_layers; layer++) {
+        float y = ground_y + (layer + 0.5f) * plank_thickness;
+        float stagger_angle = (layer % 2 == 0) ? 0.0f : 3.14159f / planks_per_ring;
+
+        for (unsigned p = 0; p < planks_per_ring; p++) {
+            float angle = (float)p / (float)planks_per_ring * 6.283f + stagger_angle;
+            float px = cx + cosf(angle) * radius;
+            float pz = cz + sinf(angle) * radius;
+
+            // Orient plank tangent to ring
+            if (cosf(angle) > 0.7f || cosf(angle) < -0.7f) {
+                place_plank(px, y, pz, 0); // along X
+            } else {
+                place_plank(px, y, pz, 2); // along Z
+            }
+        }
+    }
+}
+
+// Build a bridge between two points
+static void build_bridge(float x1, float z1, float x2, float z2, unsigned deck_layers, float height_above_ground) {
+    float dx = x2 - x1;
+    float dz = z2 - z1;
+    float length = sqrtf(dx * dx + dz * dz);
+    float nx = dx / length;
+    float nz = dz / length;
+
+    unsigned num_planks = (unsigned)(length / plank_length) + 1;
+    float support_interval = plank_length * 6.0f; // supports every ~30 units
+    unsigned num_supports = (unsigned)(length / support_interval) + 2;
+
+    // Deck: two layers for stability
+    for (unsigned layer = 0; layer < deck_layers; layer++) {
+        float y = ground_y + height_above_ground + (layer + 0.5f) * plank_thickness;
+        for (unsigned p = 0; p < num_planks; p++) {
+            float t = (float)p / (float)num_planks;
+            float px = x1 + dx * t;
+            float pz = z1 + dz * t;
+            // Place planks perpendicular to bridge direction
+            if (fabsf(nx) > fabsf(nz)) {
+                place_plank(px, y, pz, 2); // along Z
+            } else {
+                place_plank(px, y, pz, 0); // along X
+            }
+        }
+    }
+
+    // Support towers at intervals
+    for (unsigned s = 0; s < num_supports; s++) {
+        float t = (float)s / (float)(num_supports - 1);
+        float px = x1 + dx * t;
+        float pz = z1 + dz * t;
+
+        // Build a small support column
+        unsigned support_height = (unsigned)(height_above_ground / plank_thickness) + 1;
+        for (unsigned h = 0; h < support_height; h++) {
+            float y = ground_y + (h + 0.5f) * plank_thickness;
+            place_plank(px, y, pz, 0);
+            place_plank(px, y, pz, 2);
+        }
+    }
+}
+
+// Build a small wall segment (for fences, barriers, interior walls)
+static void build_wall_segment(float sx, float sz, float ex, float ez, unsigned layers) {
+    float dx = ex - sx;
+    float dz = ez - sz;
+    float length = sqrtf(dx * dx + dz * dz);
+    float nx = dx / length;
+    float nz = dz / length;
+    unsigned num_planks = (unsigned)(length / plank_length) + 1;
+
+    for (unsigned layer = 0; layer < layers; layer++) {
+        float y = ground_y + (layer + 0.5f) * plank_thickness;
+        float stagger = (layer % 2 == 0) ? 0.0f : plank_length * 0.5f;
+        for (unsigned p = 0; p < num_planks; p++) {
+            float t = (float)(p + 0.5f) / (float)num_planks;
+            float px = sx + dx * t;
+            float pz = sz + dz * t;
+            if (fabsf(nx) > fabsf(nz)) {
+                place_plank(px, y, pz, 2);
+            } else {
+                place_plank(px, y, pz, 0);
+            }
+        }
+    }
+}
+
+// Build a pyramid-like stepped structure
+static void build_pyramid(float cx, float cz, unsigned base_planks, unsigned total_layers) {
+    for (unsigned layer = 0; layer < total_layers; layer++) {
+        float y = ground_y + (layer + 0.5f) * plank_thickness;
+        // Shrink the footprint each 4 layers
+        unsigned shrink = layer / 4;
+        unsigned current_size = base_planks - shrink;
+        if (current_size < 2) current_size = 2;
+        float half_w = (float)current_size * plank_length * 0.5f;
+        float half_d = half_w;
+
+        // Build a square ring at this layer
+        float stagger = (layer % 2 == 0) ? 0.0f : plank_length * 0.5f;
+        // Front/back
+        for (float x = -half_w; x < half_w; x += plank_length) {
+            place_plank(cx + x + stagger, y, cz + half_d, 0);
+            place_plank(cx + x + stagger, y, cz - half_d, 0);
+        }
+        // Left/right
+        for (float z = -half_d; z < half_d; z += plank_length) {
+            place_plank(cx - half_w, y, cz + z + stagger, 2);
+            place_plank(cx + half_w, y, cz + z + stagger, 2);
+        }
+    }
+}
+
+// Build the old random scene (8192 boxes + 1024 spheres)
+static void build_old_scene() {
+    printf("[scene] building old random scene...\n");
+
+    for (unsigned i = 0; i < 8192; ++i) {
+        float sx = (float)rand() / (float)RAND_MAX + 0.5f;
+        float sy = (float)rand() / (float)RAND_MAX + 0.5f;
+        float sz = (float)rand() / (float)RAND_MAX + 0.5f;
+
+        unsigned body = add_box(8.0f * sx * sy * sz, sx, sy, sz);
+        if (body) {
+            bodies.transforms[body].position[0] = (float)rand() / (float)RAND_MAX * 10.0f - 5.0f;
+            bodies.transforms[body].position[1] = (float)rand() / (float)RAND_MAX * 300.0f;
+            bodies.transforms[body].position[2] = (float)rand() / (float)RAND_MAX * 10.0f - 5.0f;
+        }
+    }
+
+    for (unsigned i = 0; i < 1024; ++i) {
+        float s = (float)rand() / (float)RAND_MAX + 0.5f;
+
+        unsigned body = add_sphere(4.18879f * s * s * s, s);
+        if (body) {
+            bodies.transforms[body].position[0] = (float)rand() / (float)RAND_MAX * 10.0f - 5.0f;
+            bodies.transforms[body].position[1] = (float)rand() / (float)RAND_MAX * 300.0f;
+            bodies.transforms[body].position[2] = (float)rand() / (float)RAND_MAX * 10.0f - 5.0f;
+        }
+    }
+
+    printf("[scene] done! bodies: %u, colliders: %u\n", bodies.count, colliders.boxes.count + colliders.spheres.count);
+}
+
+// Build the complete scene with architecture
+static void build_scene() {
+    printf("[scene] building structures...\n");
+
+    // --- Small house ---
+    printf("[scene] building small house at (-15,-10)\n");
+    build_house(-15.0f, -10.0f, 2, 2, 6);
+
+    // --- Medium house ---
+    printf("[scene] building medium house at (15,-10)\n");
+    build_house(15.0f, -10.0f, 3, 2, 8);
+
+    // --- Skyscraper (small) ---
+    printf("[scene] building skyscraper at (0,0)\n");
+    build_skyscraper(0.0f, 0.0f, 2, 2, 5);
+
+    // --- Tower ---
+    printf("[scene] building tower at (20,15)\n");
+    build_tower(20.0f, 15.0f, 2, 15);
+
+    // --- Bridge ---
+    printf("[scene] building bridge\n");
+    build_bridge(-20.0f, 5.0f, 20.0f, 5.0f, 2, 4.0f);
+
+    // --- Pyramid ---
+    printf("[scene] building pyramid at (-20,20)\n");
+    build_pyramid(-20.0f, 20.0f, 4, 12);
+
+    // --- Spheres for impact ---
+    printf("[scene] adding spheres\n");
+    for (unsigned i = 0; i < 16; ++i) {
+        float s = (float)rand() / (float)RAND_MAX * 0.5f + 0.5f;
+        unsigned body = add_sphere(4.18879f * s * s * s, s);
+        if (body) {
+            bodies.transforms[body].position[0] = (float)rand() / (float)RAND_MAX * 50.0f - 25.0f;
+            bodies.transforms[body].position[1] = ground_y + 15.0f + (float)rand() / (float)RAND_MAX * 20.0f;
+            bodies.transforms[body].position[2] = (float)rand() / (float)RAND_MAX * 40.0f - 10.0f;
+        }
+    }
+
+    printf("[scene] done! bodies: %u, box_colliders: %u, sphere_colliders: %u\n",
+           bodies.count, colliders.boxes.count, colliders.spheres.count);
+}
 
 static inline void quaternion_concat(float r[4], const float a[4], const float b[4]) {
 	r[0] = b[0]*a[3] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1];
@@ -674,56 +1022,70 @@ static void draw_sky() {
 static void simulate() {
 	static const unsigned steps = 2;
 	static const unsigned iterations = 10;
-	
+	static unsigned sim_frame = 0;
+
 	float time_step = 1.0f / (60.0f * (float)steps);
-	
+
+	// Reduce gravity and increase damping initially to prevent explosion
+	// from massive initial contacts when planks are stacked tightly.
+	float gravity_scale = 1.0f;
+	float damping_extra = 0.0f;
+	if (sim_frame < 120) {
+		gravity_scale = 0.1f; // 10% gravity for first 2 seconds
+		damping_extra = 0.1f; // extra damping for first 2 seconds
+	}
+
 	for (unsigned n = 0; n < steps; ++n) {
-		// Setup a temporary memory arena. The same temporary memory is reused each iteration.
 		nudge::Arena temporary = arena;
-		
-		// Find contacts.
-		nudge::BodyConnections connections = {}; // NOTE: Custom constraints should be added as body connections.
+
+		nudge::BodyConnections connections = {};
 		nudge::collide(&active_bodies, &contact_data, bodies, colliders, connections, temporary);
-		
-		// NOTE: Custom contacts can be added here, e.g., against the static environment.
-		
-		// Apply gravity and damping.
-		float damping = 1.0f - time_step*0.25f;
-		
+
+		float damping = 1.0f - time_step * 0.25f - damping_extra;
+
 		for (unsigned i = 0; i < active_bodies.count; ++i) {
 			unsigned index = active_bodies.indices[i];
-			
-			bodies.momentum[index].velocity[1] -= 9.82f * time_step;
-			
+
+			bodies.momentum[index].velocity[1] -= 9.82f * gravity_scale * time_step;
+
 			bodies.momentum[index].velocity[0] *= damping;
 			bodies.momentum[index].velocity[1] *= damping;
 			bodies.momentum[index].velocity[2] *= damping;
-			
+
 			bodies.momentum[index].angular_velocity[0] *= damping;
 			bodies.momentum[index].angular_velocity[1] *= damping;
 			bodies.momentum[index].angular_velocity[2] *= damping;
+
+			// Clamp velocities to prevent NaN explosion
+			for (unsigned ax = 0; ax < 3; ++ax) {
+				float v = bodies.momentum[index].velocity[ax];
+				float av = fabsf(v);
+				if (av > 10000.0f || v != v) {
+					bodies.momentum[index].velocity[ax] = (v != v) ? 0.0f : (av > 10000.0f ? (v < 0 ? -10000.0f : 10000.0f) : v);
+				}
+				v = bodies.momentum[index].angular_velocity[ax];
+				av = fabsf(v);
+				if (av > 1000.0f || v != v) {
+					bodies.momentum[index].angular_velocity[ax] = (v != v) ? 0.0f : (av > 1000.0f ? (v < 0 ? -1000.0f : 1000.0f) : v);
+				}
+			}
 		}
-		
-		// Read previous impulses from contact cache.
+
 		nudge::ContactImpulseData* contact_impulses = nudge::read_cached_impulses(contact_cache, contact_data, &temporary);
-		
-		// Setup contact constraints and apply the initial impulses.
 		nudge::ContactConstraintData* contact_constraints = nudge::setup_contact_constraints(active_bodies, contact_data, bodies, contact_impulses, &temporary);
-		
-		// Apply contact impulses. Increasing the number of iterations will improve stability.
+
 		for (unsigned i = 0; i < iterations; ++i) {
 			nudge::apply_impulses(contact_constraints, bodies);
-			// NOTE: Custom constraint impulses should be applied here.
 		}
-		
-		// Update contact impulses.
+
 		nudge::update_cached_impulses(contact_constraints, contact_impulses);
-		
-		// Write the updated contact impulses to the cache.
 		nudge::write_cached_impulses(&contact_cache, contact_data, contact_impulses);
-		
-		// Move active bodies.
 		nudge::advance(active_bodies, bodies, time_step);
+	}
+
+	sim_frame++;
+	if (sim_frame % 60 == 0) {
+		printf("[sim] frame=%u bodies=%u contacts=%u\n", sim_frame, bodies.count, contact_data.count);
 	}
 }
 
@@ -802,49 +1164,20 @@ int main(int argc, const char* argv[]) {
 	// Add ground.
 	{
 		unsigned collider = colliders.boxes.count++;
-		
+
 		colliders.boxes.transforms[collider] = identity_transform;
 		colliders.boxes.transforms[collider].position[1] -= 20.0f;
-		
+
 		colliders.boxes.data[collider].size[0] = 400.0f;
 		colliders.boxes.data[collider].size[1] = 10.0f;
 		colliders.boxes.data[collider].size[2] = 400.0f;
 		colliders.boxes.tags[collider] = collider;
 	}
-	
-	// Add boxes.
-	for (unsigned i = 0; i < 8192; ++i) {
-	// for (unsigned i = 0; i < 64; ++i) {
-		// float sx = 1.f;
-		// float sy = 1.f;
-		// float sz = 1.f;
-		float sx = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
-		float sy = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
-		float sz = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
-		
-		unsigned body = add_box(8.0f*sx*sy*sz, sx, sy, sz);
-		
-		// bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-		// bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
-		// bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-		bodies.transforms[body].position[0] = (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-		bodies.transforms[body].position[1] = (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
-		bodies.transforms[body].position[2] = (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-		// bodies.transforms[body].position[0] += i/64.f * 10.0f - 5.0f;
-		// bodies.transforms[body].position[1] += (i+10)/1024.f * 300.0f;
-		// bodies.transforms[body].position[2] += i/64.f * 10.0f - 5.0f;
-	}
-	
-	// Add spheres.
-	for (unsigned i = 0; i < 1024; ++i) {
-		float s = (float)rand() * (1.0f/(float)RAND_MAX) + 0.5f;
-		
-		unsigned body = add_sphere(4.18879f*s*s*s, s);
-		
-		bodies.transforms[body].position[0] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-		bodies.transforms[body].position[1] += (float)rand() * (1.0f/(float)RAND_MAX) * 300.0f;
-		bodies.transforms[body].position[2] += (float)rand() * (1.0f/(float)RAND_MAX) * 10.0f - 5.0f;
-	}
+
+	// Build the scene
+	// Change to build_old_scene() for the old random boxes+spheres scene
+	build_old_scene();
+	// build_scene();
 	
 	// Start GLUT.
 	glutInit(&argc, const_cast<char**>(argv));
