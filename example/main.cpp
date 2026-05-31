@@ -43,7 +43,7 @@
 #endif
 
 static const unsigned max_body_count = 19200;
-static const unsigned max_box_count = 8192;
+static const unsigned max_box_count = 19200;
 static const unsigned max_sphere_count = 4096;
 
 static const nudge::Transform identity_transform = { {}, 0, { 0.0f, 0.0f, 0.0f, 1.0f } };
@@ -136,6 +136,8 @@ static void raw_input_poll() {
 #else
 static void raw_input_poll() {}
 #endif
+
+static void draw_sky();
 
 static inline void quaternion_concat(float r[4], const float a[4], const float b[4]) {
 	r[0] = b[0]*a[3] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1];
@@ -368,9 +370,9 @@ static inline void camera_update(float dt) {
 // GLUT keyboard callbacks - track key state.
 static void key_down(unsigned char key, int, int) {
     if (key < 256) key_state[key] = true;
-    if (debug_frame == 0 || (key == 'W' || key == 'w')) {
-        printf("[key down] %c (ascii=%d)\n", (key >= 32 && key < 127) ? (char)key : '?', (int)key);
-    }
+    // if (debug_frame == 0 || (key == 'W' || key == 'w')) {
+    //     printf("[key down] %c (ascii=%d)\n", (key >= 32 && key < 127) ? (char)key : '?', (int)key);
+    // }
 }
 
 static void key_up(unsigned char key, int, int) {
@@ -398,9 +400,21 @@ static void render() {
 	glEnable(GL_NORMALIZE);
 	glEnable(GL_LIGHTING);
 	glEnable(GL_LIGHT0);
+	glEnable(GL_LIGHT1);
 	
-	glClearColor(1.0f, 1.0f, 1.0f, 1.0f);
+	// Fallback clear color — sky sphere covers the view but this handles edges.
+	glClearColor(0.06f, 0.07f, 0.12f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);
+
+	// Specular material — shiny highlights on all surfaces.
+	GLfloat specular[] = { 0.4f, 0.4f, 0.4f, 1.0f };
+	GLfloat shininess[] = { 32.0f };
+	glMaterialfv(GL_FRONT_AND_BACK, GL_SPECULAR, specular);
+	glMaterialfv(GL_FRONT_AND_BACK, GL_SHININESS, shininess);
+
+	// Enable color material so glColor3f drives diffuse + ambient per-body.
+	glColorMaterial(GL_FRONT_AND_BACK, GL_DIFFUSE);
+	glEnable(GL_COLOR_MATERIAL);
 	
 	// Setup projection.
 	GLint viewport[4];
@@ -439,13 +453,28 @@ static void render() {
 		);
 	}
 
-	// Setup light.
-	GLfloat light_ambient[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-	GLfloat light_diffuse[] = { 1.0f, 1.0f, 1.0f, 1.0f };
-	GLfloat light_direction[] = { 1.0f, 1.0f, 1.0f, 0.0f };
-	glLightfv(GL_LIGHT0, GL_AMBIENT, light_ambient);
-	glLightfv(GL_LIGHT0, GL_DIFFUSE, light_diffuse);
-	glLightfv(GL_LIGHT0, GL_POSITION, light_direction);
+	// Light 0 — main directional (warm, strong direct).
+	GLfloat l0_ambient[] = { 0.15f, 0.15f, 0.18f, 1.0f };
+	GLfloat l0_diffuse[] = { 1.0f, 0.95f, 0.9f, 1.0f };
+	GLfloat l0_position[] = { 2.0f, 3.0f, 1.0f, 0.0f };
+	glLightfv(GL_LIGHT0, GL_AMBIENT, l0_ambient);
+	glLightfv(GL_LIGHT0, GL_DIFFUSE, l0_diffuse);
+	glLightfv(GL_LIGHT0, GL_POSITION, l0_position);
+
+	// Light 1 — fill from opposite side (cool, weaker).
+	GLfloat l1_ambient[] = { 0.0f, 0.0f, 0.0f, 1.0f };
+	GLfloat l1_diffuse[] = { 0.3f, 0.35f, 0.5f, 1.0f };
+	GLfloat l1_position[] = { -1.0f, 1.0f, -2.0f, 0.0f };
+	glLightfv(GL_LIGHT1, GL_AMBIENT, l1_ambient);
+	glLightfv(GL_LIGHT1, GL_DIFFUSE, l1_diffuse);
+	glLightfv(GL_LIGHT1, GL_POSITION, l1_position);
+
+	// Global ambient — dim fill so shadows are visible.
+	GLfloat global_ambient[] = { 0.08f, 0.08f, 0.1f, 1.0f };
+	glLightModelfv(GL_LIGHT_MODEL_AMBIENT, global_ambient);
+
+	// Draw procedural gradient sky (before scene, depth write off).
+	draw_sky();
 	
 	// Render boxes.
 	for (unsigned i = 0; i < colliders.boxes.count; ++i) {
@@ -466,6 +495,18 @@ static void render() {
 
 		float m[16];
 		matrix(m, scale, rotation, position);
+
+		// Per-body color.
+		if (body == 0) {
+			// Ground — dark greenish-grey.
+			glColor3f(0.25f, 0.3f, 0.2f);
+		} else {
+			float hue = (float)(body * 7 + 13) / 256.0f;
+			float cr = 0.5f + 0.5f * cosf(6.283f * (hue + 0.0f));
+			float cg = 0.5f + 0.5f * cosf(6.283f * (hue + 0.33f));
+			float cb = 0.5f + 0.5f * cosf(6.283f * (hue + 0.66f));
+			glColor3f(cr, cg, cb);
+		}
 
 		glPushMatrix();
 		glMultMatrixf(m);
@@ -493,13 +534,77 @@ static void render() {
 		float m[16];
 		matrix(m, scale, rotation, position);
 
+		// Per-body color — offset hue so spheres differ from boxes.
+		float hue = (float)(body * 7 + 13) / 256.0f;
+		float cr = 0.5f + 0.5f * cosf(6.283f * (hue + 0.0f + 0.5f));
+		float cg = 0.5f + 0.5f * cosf(6.283f * (hue + 0.33f + 0.5f));
+		float cb = 0.5f + 0.5f * cosf(6.283f * (hue + 0.66f + 0.5f));
+		glColor3f(cr, cg, cb);
+
 		glPushMatrix();
 		glMultMatrixf(m);
-		glutSolidSphere(1.0f, 16, 8);
+		glutSolidSphere(1.0f, 32, 16);
 		glPopMatrix();
 	}
 	
 	glutSwapBuffers();
+	// Reset color material for safety.
+	glDisable(GL_COLOR_MATERIAL);
+}
+
+// Draw a large procedural gradient sphere as the sky.
+// Vertical gradient: dark horizon → mid blue → near-black zenith.
+static void draw_sky() {
+	const float radius = 500.0f;
+	const unsigned bands = 32;
+	const unsigned rings = 32;
+
+	glDisable(GL_LIGHTING);
+	glDisable(GL_COLOR_MATERIAL);
+	glDisable(GL_DEPTH_WRITEMASK);
+
+	// Pre-compute theta angles for each latitude band.
+	float theta[bands + 1], sin_t[bands + 1], cos_t[bands + 1];
+	for (unsigned i = 0; i <= bands; ++i) {
+		theta[i] = (float)i / (float)bands * 3.14159f;
+		sin_t[i] = sinf(theta[i]);
+		cos_t[i] = cosf(theta[i]);
+	}
+
+	glBegin(GL_QUADS);
+	for (unsigned i = 0; i < bands; ++i) {
+		// Color: interpolate horizon → mid → zenith.
+		float t = (float)(i + 0.5f) / (float)bands;
+		float r, g, b;
+		if (t < 0.5f) {
+			float s = t * 2.0f;
+			r = 0.15f + (0.25f - 0.15f) * s;
+			g = 0.15f + (0.28f - 0.15f) * s;
+			b = 0.22f + (0.40f - 0.22f) * s;
+		} else {
+			float s = (t - 0.5f) * 2.0f;
+			r = 0.25f + (0.06f - 0.25f) * s;
+			g = 0.28f + (0.07f - 0.28f) * s;
+			b = 0.40f + (0.12f - 0.40f) * s;
+		}
+
+		for (unsigned j = 0; j < rings; ++j) {
+			float phi0 = (float)j       / (float)rings * 6.28318f;
+			float phi1 = (float)(j + 1) / (float)rings * 6.28318f;
+
+			// Emit a quad between latitude bands i and i+1.
+			glColor3f(r, g, b);
+			glVertex3f(sin_t[i]   * cosf(phi0) * radius, cos_t[i]   * radius, sin_t[i]   * sinf(phi0) * radius);
+			glVertex3f(sin_t[i + 1] * cosf(phi0) * radius, cos_t[i + 1] * radius, sin_t[i + 1] * sinf(phi0) * radius);
+			glVertex3f(sin_t[i + 1] * cosf(phi1) * radius, cos_t[i + 1] * radius, sin_t[i + 1] * sinf(phi1) * radius);
+			glVertex3f(sin_t[i]   * cosf(phi1) * radius, cos_t[i]   * radius, sin_t[i]   * sinf(phi1) * radius);
+		}
+	}
+	glEnd();
+
+	glEnable(GL_DEPTH_WRITEMASK);
+	glEnable(GL_LIGHTING);
+	glEnable(GL_COLOR_MATERIAL);
 }
 
 static void simulate() {
@@ -594,7 +699,7 @@ int main(int argc, const char* argv[]) {
 	
 	// Allocate memory for simulation arena.
 	// arena.size = 64*1024*1024;
-	arena.size = 256*1024*1024;
+	arena.size = 512*1024*1024;
 	arena.data = _mm_malloc(arena.size, 4096);
 	
 	// Allocate memory for bodies, colliders, and contacts.
@@ -645,7 +750,7 @@ int main(int argc, const char* argv[]) {
 	}
 	
 	// Add boxes.
-	for (unsigned i = 0; i < 4096; ++i) {
+	for (unsigned i = 0; i < 8192; ++i) {
 	// for (unsigned i = 0; i < 64; ++i) {
 		// float sx = 1.f;
 		// float sy = 1.f;
