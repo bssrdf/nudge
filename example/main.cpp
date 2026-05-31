@@ -26,6 +26,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <vector>
 
 #ifdef __APPLE__
 #include <GLUT/GLUT.h>
@@ -33,6 +34,12 @@
 #else
 #include <GLUT/glut.h>
 #include <gl/gl.h>
+#ifdef _WIN32
+#ifndef _WIN32_WINNT
+#define _WIN32_WINNT 0x0601  // Windows 7+ for RAWMOUSE.lLastMoveX/Y
+#endif
+#include <windows.h>
+#endif
 #endif
 
 static const unsigned max_body_count = 19200;
@@ -56,12 +63,79 @@ static bool mouse_locked = false;
 
 // Camera settings
 static const float camera_move_speed = 40.0f;
-static const float camera_mouse_sensitivity = 0.001f;
+static const float camera_mouse_sensitivity = 0.0005f;
 static const float camera_pitch_max = 1.5f;  // ~85 degrees
 
 // Key state tracked by GLUT callbacks
 static bool key_state[256] = {};
 static int debug_frame = 0;
+
+// Raw mouse input (Windows)
+#ifdef _WIN32
+static int raw_mouse_dx = 0, raw_mouse_dy = 0;
+static HWND raw_input_hwnd = NULL;
+static WNDPROC raw_input_old_proc = NULL;
+
+static LRESULT CALLBACK RawInputWndProc(HWND hwnd, UINT msg, WPARAM wParam, LPARAM lParam)
+{
+    if (msg == WM_INPUT) {
+        UINT size = 0;
+        GetRawInputData((HRAWINPUT)lParam, RID_INPUT, NULL, &size, sizeof(RAWINPUTHEADER));
+        if (size > 0 && size < 4096) {
+            uint8_t buf[4096];
+            UINT read = GetRawInputData((HRAWINPUT)lParam, RID_INPUT, buf, &size, sizeof(RAWINPUTHEADER));
+            if (read != UINT_MAX && read == size) {
+                RAWINPUT* ri = (RAWINPUT*)buf;
+                if (ri->header.dwType == RIM_TYPEMOUSE) {
+                    LONG dx = ri->data.mouse.lLastX;
+                    LONG dy = ri->data.mouse.lLastY;
+                    raw_mouse_dx += dx;
+                    raw_mouse_dy += dy;
+                }
+            }
+        }
+        return 0;
+    }
+    return CallWindowProc(raw_input_old_proc, hwnd, msg, wParam, lParam);
+}
+
+static void raw_input_init(HWND hwnd)
+{
+    raw_input_hwnd = hwnd;
+    RAWINPUTDEVICE rid;
+    rid.usUsagePage = 1;  // Generic desktop
+    rid.usUsage = 2;       // Mouse
+    rid.dwFlags = RIDEV_INPUTSINK;  // Receive even when not focused
+    rid.hwndTarget = hwnd;
+    RegisterRawInputDevices(&rid, 1, sizeof(rid));
+
+    raw_input_old_proc = (WNDPROC)SetWindowLongPtr(hwnd, GWLP_WNDPROC, (LONG_PTR)RawInputWndProc);
+}
+
+static void raw_input_shutdown()
+{
+    if (raw_input_hwnd && raw_input_old_proc) {
+        SetWindowLongPtr(raw_input_hwnd, GWLP_WNDPROC, (LONG_PTR)raw_input_old_proc);
+    }
+    raw_input_hwnd = NULL;
+    raw_input_old_proc = NULL;
+}
+
+static void raw_input_poll() {
+    if (!mouse_locked) return;
+    if (raw_mouse_dx == 0 && raw_mouse_dy == 0) return;
+
+    camera_yaw -= raw_mouse_dx * camera_mouse_sensitivity;
+    camera_pitch -= raw_mouse_dy * camera_mouse_sensitivity;
+    if (camera_pitch < -camera_pitch_max) camera_pitch = -camera_pitch_max;
+    if (camera_pitch > camera_pitch_max) camera_pitch = camera_pitch_max;
+
+    raw_mouse_dx = 0;
+    raw_mouse_dy = 0;
+}
+#else
+static void raw_input_poll() {}
+#endif
 
 static inline void quaternion_concat(float r[4], const float a[4], const float b[4]) {
 	r[0] = b[0]*a[3] + a[0]*b[3] + a[1]*b[2] - a[2]*b[1];
@@ -304,40 +378,17 @@ static void key_up(unsigned char key, int, int) {
 }
 
 static void mouse_motion(int x, int y) {
-    //if (!mouse_locked) return;
-
-    static int last_x = -1, last_y = -1;
-    if (last_x < 0 || last_y < 0) { 
-		//printf("lats x < 0 %d, %d\n", last_x, x);
-		last_x = x; last_y = y; 		
-	    return; 
-	}
-
-    int dx = x - last_x;
-    int dy = y - last_y;
-    last_x = x;
-    last_y = y;
-
-	//printf("lats x,y  %d, %d x, y %d %d dx,dy %d %d\n", last_x, last_y, x, y, dx, dy);
-
-    // Right hand: mouse right → look right (negative yaw), mouse up → look up
-    camera_yaw -= dx * camera_mouse_sensitivity;
-    camera_pitch -= dy * camera_mouse_sensitivity;
-
-    // Clamp pitch
-    if (camera_pitch < -camera_pitch_max) camera_pitch = -camera_pitch_max;
-    if (camera_pitch > camera_pitch_max) camera_pitch = camera_pitch_max;
+    // No-op: camera rotation is handled by raw_input_poll() on Windows,
+    // or falls through to normal GLUT motion when mouse is unlocked.
+    (void)x; (void)y;
 }
 
 static void mouse_button(int button, int state, int x, int y) {
     if (button == GLUT_LEFT_BUTTON && state == GLUT_DOWN) {
-        mouse_locked = !mouse_locked;  // toggle on click
+        mouse_locked = !mouse_locked;
         printf("[mouse] locked=%d\n", mouse_locked);
     }
-    // When unlocking, reset last position to avoid jump
-    //if (!mouse_locked) {
-        mouse_motion(x, y);  // resets static last_x/last_y implicitly on next call
-    //}
+    (void)x; (void)y;
 }
 
 
@@ -508,6 +559,7 @@ static void simulate() {
 }
 
 static void timer(int) {
+	raw_input_poll();
 	camera_update(1.0f / 60.0f);
 	glutPostRedisplay();
 	glutTimerFunc(16, timer, 0);
@@ -629,7 +681,7 @@ int main(int argc, const char* argv[]) {
 	// Start GLUT.
 	glutInit(&argc, const_cast<char**>(argv));
 	glutInitDisplayMode(GLUT_RGBA | GLUT_DEPTH | GLUT_DOUBLE);
-	glutInitWindowSize(1024, 1024);
+	glutInitWindowSize(1560, 1024);
 	glutCreateWindow("nudge");
 	glutDisplayFunc(render);
 	glutKeyboardFunc(key_down);
@@ -637,6 +689,16 @@ int main(int argc, const char* argv[]) {
 	glutMotionFunc(mouse_motion);
 	glutPassiveMotionFunc(mouse_motion);
 	glutMouseFunc(mouse_button);
+
+#ifdef _WIN32
+	HWND hwnd = GetForegroundWindow();
+	if (hwnd) {
+		raw_input_init(hwnd);
+		printf("[raw input] initialized on window 0x%p\n", hwnd);
+	} else {
+		printf("[raw input] WARNING: no foreground window\n");
+	}
+#endif
 
 	printf("Controls: click to lock/unlock mouse | WASD move (W/S follows pitch) | X sprint | B drop box | Space shoot sphere | Esc quit\n");
 	printf("[debug] key states printed every 30 frames\n");
