@@ -144,6 +144,8 @@ namespace nudge {
 	void update_cached_impulses(ContactConstraintData* data, ContactImpulseData* contact_impulses);
 	
 	void advance(ActiveBodies active_bodies, BodyData bodies, float time_step);
+
+	void print_simd_info();
 }
 
 #endif
