@@ -922,6 +922,7 @@ namespace simd512 {
 		z = _mm512_shuffle_ps(tmp1, tmp3, 0x44); // [x2 y2 z2 w2 | x6 y6 z6 w6 | ...]
 		w = _mm512_shuffle_ps(tmp1, tmp3, 0xEE); // [x3 y3 z3 w3 | x7 y7 z7 w7 | ...]
 	}
+
 }
 
 namespace simd {
@@ -984,6 +985,7 @@ namespace simd_float {
     );
 		// return _mm512_mask_blend_ps(_mm512_cmplt_ps_mask(y, x), y, x);
 	}
+
 
 	NUDGE_FORCEINLINE simd16_float cmp_lt(simd16_float x, simd16_float y) { return _mm512_castsi512_ps(_mm512_maskz_set1_epi32(_mm512_cmplt_ps_mask(x, y), -1)); }
 	NUDGE_FORCEINLINE simd16_float cmp_eq(simd16_float x, simd16_float y) { return _mm512_castsi512_ps(_mm512_maskz_set1_epi32(_mm512_cmpeq_ps_mask(x, y), -1)); }
@@ -1169,6 +1171,21 @@ namespace simd_float {
 	NUDGE_FORCEINLINE simdv_float loaduv(const float* p) { return loadu16(p); }
 	NUDGE_FORCEINLINE void storev(float* p, simdv_float x) { store16(p, x); }
 	NUDGE_FORCEINLINE void storeuv(float* p, simdv_float x) { storeu16(p, x); }
+
+	NUDGE_FORCEINLINE void load4transpose(const float* data, const unsigned offset, simdv_float& x, simdv_float& y, simdv_float& z, simdv_float& w) {
+		simdv_int32 one = simd_int32::make16(1);
+		simdv_int32 vindex = simd_int32::make16(
+			0*offset, 1*offset, 2*offset, 3*offset, 4*offset, 5*offset, 6*offset, 7*offset,
+			8*offset, 9*offset, 10*offset, 11*offset, 12*offset, 13*offset, 14*offset, 15*offset
+		);
+		x = _mm512_i32gather_ps (vindex, data, 4);
+		vindex = simd_int32::add(vindex, one);
+		y = _mm512_i32gather_ps (vindex, data, 4);
+		vindex = simd_int32::add(vindex, one);
+		z = _mm512_i32gather_ps (vindex, data, 4);
+		vindex = simd_int32::add(vindex, one);
+		w = _mm512_i32gather_ps (vindex, data, 4);
+	}
 }
 
 namespace simd_int32 {
@@ -3653,17 +3670,8 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 		simdv_float pos_z = simd::concat(pos_zl, simd_float::load4(&aos_bounds[i+6].min.x));
 		simdv_float pos_w = simd::concat(pos_wl, simd_float::load4(&aos_bounds[i+7].min.x));
 #elif NUDGE_SIMDV_WIDTH == 512
-		simd4_float px0=simd_float::load4(&aos_bounds[i+ 0].min.x),px1=simd_float::load4(&aos_bounds[i+ 1].min.x),px2=simd_float::load4(&aos_bounds[i+ 2].min.x),px3=simd_float::load4(&aos_bounds[i+ 3].min.x);
-		simd128::transpose32(px0,px1,px2,px3);
-		simd4_float px4=simd_float::load4(&aos_bounds[i+ 4].min.x),px5=simd_float::load4(&aos_bounds[i+ 5].min.x),px6=simd_float::load4(&aos_bounds[i+ 6].min.x),px7=simd_float::load4(&aos_bounds[i+ 7].min.x);
-		simd128::transpose32(px4,px5,px6,px7);
-		simd4_float px8=simd_float::load4(&aos_bounds[i+ 8].min.x),px9=simd_float::load4(&aos_bounds[i+ 9].min.x),pxa=simd_float::load4(&aos_bounds[i+10].min.x),pxb=simd_float::load4(&aos_bounds[i+11].min.x);
-		simd128::transpose32(px8,px9,pxa,pxb);
-		simd4_float pxc=simd_float::load4(&aos_bounds[i+12].min.x),pxd=simd_float::load4(&aos_bounds[i+13].min.x),pxe=simd_float::load4(&aos_bounds[i+14].min.x),pxf=simd_float::load4(&aos_bounds[i+15].min.x);
-		simd128::transpose32(pxc,pxd,pxe,pxf);
-		simdv_float pos_x=simd::concat(simd::concat(px0,px4),simd::concat(px8,pxc));
-		simdv_float pos_y=simd::concat(simd::concat(px1,px5),simd::concat(px9,pxd));
-		simdv_float pos_z=simd::concat(simd::concat(px2,px6),simd::concat(pxa,pxe));
+		simdv_float pos_x, pos_y, pos_z, pos_w;
+		simd_float::load4transpose(&aos_bounds[i+0].min.x, 8, pos_x, pos_y, pos_z, pos_w);
 #else
 		simd4_float pos_x = simd_float::load4(&aos_bounds[i+0].min.x);
 		simd4_float pos_y = simd_float::load4(&aos_bounds[i+1].min.x);
