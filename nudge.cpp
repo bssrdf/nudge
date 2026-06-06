@@ -26,6 +26,7 @@
 #include <math.h>
 #include <stdio.h>
 #include <string.h>
+#include <chrono>
 
 #ifdef _WIN32
 #include <intrin.h>
@@ -62,6 +63,7 @@ namespace nudge {
 
 static const float allowed_penetration = 1e-3f;
 static const float bias_factor = 2.0f;
+static const float friction_coeff = 0.25f;
 
 #if NUDGE_SIMDV_WIDTH == 128
 #define NUDGE_SIMDV_ALIGNED NUDGE_ALIGNED(16)
@@ -2512,7 +2514,7 @@ static unsigned box_box_collide(uint32_t* pairs, unsigned pair_count, BoxCollide
 					simd_float::store4(contacts[count].normal, wn);
 					
 					contacts[count].penetration = penetration;
-					contacts[count].friction = 0.5f;
+					contacts[count].friction = friction_coeff;
 					bodies[count].a = a_body;
 					bodies[count].b = b_body;
 					tags[count] = (uint32_t)(support_tags[index] >> tag_swap) | (uint32_t)(support_tags[index] << tag_swap) | high_tag;
@@ -2922,7 +2924,7 @@ static inline unsigned sphere_sphere_collide(SphereCollider a, SphereCollider b,
 	contacts[0].normal[0] = n.x;
 	contacts[0].normal[1] = n.y;
 	contacts[0].normal[2] = n.z;
-	contacts[0].friction = 0.5f;
+	contacts[0].friction = friction_coeff;
 	
 	bodies[0].a = (uint16_t)a_transform.body;
 	bodies[0].b = (uint16_t)b_transform.body;
@@ -3005,7 +3007,7 @@ static inline unsigned box_sphere_collide(BoxCollider a, SphereCollider b, Trans
 	contacts[0].normal[0] = n.x;
 	contacts[0].normal[1] = n.y;
 	contacts[0].normal[2] = n.z;
-	contacts[0].friction = 0.5f;
+	contacts[0].friction = friction_coeff;
 	
 	bodies[0].a = (uint16_t)a_transform.body;
 	bodies[0].b = (uint16_t)b_transform.body;
@@ -3517,7 +3519,9 @@ NUDGE_FORCEINLINE static void store16(float* data, const T* indices,
 #endif
 }
 
-void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies, ColliderData colliders, BodyConnections body_connections, Arena temporary) {
+void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies, ColliderData colliders, BodyConnections body_connections, ProfileData *g_collideProfile, Arena temporary) {
+
+	auto start = std::chrono::high_resolution_clock::now();
 	contacts->count = 0;
 	contacts->sleeping_count = 0;
 	active_bodies->count = 0;
@@ -3992,7 +3996,6 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 			simdv_float inside_z = simd::bitwise_and(simd_float::cmp_gt(max_b_z, min_a_z), simd_float::cmp_gt(max_a_z, min_b_z));
 
 			unsigned mask = simd::signmask32(simd::bitwise_and(simd::bitwise_and(inside_x, inside_y), inside_z));
-			unsigned mask0 = mask;
 
 			// Mask out collisions already handled.
 			mask &= lower_lane_mask >> 16;
@@ -4672,6 +4675,14 @@ void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies
 	}
 	
 	radix_sort_uint32(contacts->sleeping_pairs, contacts->sleeping_count, temporary);
+
+	auto end = std::chrono::high_resolution_clock::now();
+
+    g_collideProfile->totalTimeNs +=
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            end - start).count();
+
+    ++g_collideProfile->calls;
 }
 
 struct ContactImpulseData {
@@ -5660,7 +5671,8 @@ void advance(ActiveBodies active_bodies, BodyData bodies, float time_step) {
 		float3 velocity = make_float3(bodies.momentum[i].velocity);
 		float3 angular_velocity = make_float3(bodies.momentum[i].angular_velocity);
 		
-		if (length2(velocity) < 1e-2f && length2(angular_velocity) < 1e-1f) {
+		// if (length2(velocity) < 1e-2f && length2(angular_velocity) < 1e-1f) {
+		if (length2(velocity) < 1e-4f && length2(angular_velocity) < 1e-3f) {
 			if (bodies.idle_counters[i] < 0xff)
 				++bodies.idle_counters[i];
 		}

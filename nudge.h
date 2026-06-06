@@ -127,11 +127,17 @@ namespace nudge {
 		uint32_t capacity;
 		uint32_t count;
 	};
+
+	struct ProfileData {
+		uint64_t totalTimeNs = 0;
+		uint64_t calls = 0;
+	};
+   
 	
 	struct ContactImpulseData;
 	struct ContactConstraintData;
 	
-	void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies, ColliderData colliders, BodyConnections body_connections, Arena temporary);
+	void collide(ActiveBodies* active_bodies, ContactData* contacts, BodyData bodies, ColliderData colliders, BodyConnections body_connections, ProfileData *g_collideProfile, Arena temporary);
 	
 	ContactImpulseData* read_cached_impulses(ContactCache contact_cache, ContactData contacts, Arena* memory);
 	

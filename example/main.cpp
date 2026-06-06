@@ -55,6 +55,7 @@ static nudge::ColliderData colliders;
 static nudge::ContactData contact_data;
 static nudge::ContactCache contact_cache;
 static nudge::ActiveBodies active_bodies;
+static nudge::ProfileData g_collideProfile;
 
 // Camera state — OrbitControls style (three.js inspired)
 // Spherical coordinates: camera orbits around a target point
@@ -1039,7 +1040,7 @@ static void simulate() {
 		nudge::Arena temporary = arena;
 
 		nudge::BodyConnections connections = {};
-		nudge::collide(&active_bodies, &contact_data, bodies, colliders, connections, temporary);
+		nudge::collide(&active_bodies, &contact_data, bodies, colliders, connections, &g_collideProfile, temporary);
 
 		float damping = 1.0f - time_step * 0.25f - damping_extra;
 
@@ -1086,6 +1087,12 @@ static void simulate() {
 	sim_frame++;
 	if (sim_frame % 60 == 0) {
 		printf("[sim] frame=%u bodies=%u contacts=%u\n", sim_frame, bodies.count, contact_data.count);
+	}
+    if (sim_frame % 10 == 0) {
+        double avg =
+            (double)g_collideProfile.totalTimeNs /
+            g_collideProfile.calls / 1000.0;
+		printf("[sim] frame=%u collide avg = %.2f us\n", sim_frame, avg);
 	}
 }
 
